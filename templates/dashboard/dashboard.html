@@ -1,0 +1,603 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - VulnAssesor{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <div>
+        <h2>My Websites</h2>
+        <p class="subtitle">Manage and monitor your website security</p>
+    </div>
+    <button onclick="showAddWebsiteModal()" class="btn">
+        <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+            <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/>
+        </svg>
+        Add Website
+    </button>
+</div>
+
+{% if websites %}
+<table class="websites-table">
+    <thead>
+        <tr>
+            <th>Website</th>
+            <th>URL</th>
+            <th>Status</th>
+            <th>Date Added</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="websites-list">
+        {% for website in websites %}
+        <tr class="website-row" id="website-{{ website.pk }}">
+            <td>
+                <div class="website-name">{{ website.name }}</div>
+            </td>
+            <td>
+                <a href="{{ website.url }}" target="_blank" class="website-url" rel="noopener noreferrer">
+                    {{ website.url }}
+                </a>
+            </td>
+            <td>
+                <span class="status-badge status-active">Active</span>
+            </td>
+            <td>
+                <span class="date-text">{{ website.created_at|date:"M d, Y" }}</span>
+            </td>
+            <td>
+                <div class="action-buttons">
+                    <button onclick="showEditWebsiteModal({{ website.pk }}, '{{ website.name|escapejs }}', '{{ website.url|escapejs }}')" class="btn-icon" title="Edit">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
+                        </svg>
+                    </button>
+                    <button
+                        onclick="showDeleteWebsiteModal({{ website.pk }}, '{{ website.name|escapejs }}', '{{ website.url|escapejs }}')"
+                        class="btn-icon btn-icon-danger"
+                        title="Delete">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                        </svg>
+                    </button>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="empty-state">
+    <div class="empty-icon">
+        <svg width="80" height="80" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z"/>
+            <path d="M8 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+        </svg>
+    </div>
+    <h3>No websites yet</h3>
+    <p>Start by adding your first website to monitor its security and uptime</p>
+    <button onclick="showAddWebsiteModal()" class="btn" style="margin-top: 1.5rem;">
+        <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+            <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/>
+        </svg>
+        Add Your First Website
+    </button>
+</div>
+{% endif %}
+
+<!-- Add/Edit Website Modal -->
+<div id="websiteModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">Add Website</h3>
+            <button class="modal-close" onclick="closeWebsiteModal()">&times;</button>
+        </div>
+        <form id="websiteForm" hx-post="{% url 'website_add' %}" hx-swap="none">
+            {% csrf_token %}
+            <div class="form-field">
+                <label for="name">Website Name</label>
+                <input type="text" id="name" name="name" placeholder="My Awesome Website" required>
+            </div>
+            <div class="form-field">
+                <label for="url">Website URL</label>
+                <input type="url" id="url" name="url" placeholder="https://example.com" required>
+            </div>
+            <div class="modal-footer">
+                <button type="button" onclick="closeWebsiteModal()" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn">
+                    <span id="submitButtonText">Add Website</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div id="deleteModal" class="modal">
+    <div class="modal-content modal-danger">
+        <div class="modal-header">
+            <div class="warning-icon-header">
+                <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                </svg>
+            </div>
+            <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
+        </div>
+        <div class="delete-content">
+            <h3>Delete Website</h3>
+            <p class="delete-warning">Are you sure you want to delete this website? This action cannot be undone.</p>
+            <div class="delete-preview">
+                <div class="preview-label">You are about to delete:</div>
+                <div class="preview-info">
+                    <strong id="deleteWebsiteName"></strong>
+                    <span id="deleteWebsiteUrl"></span>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" onclick="closeDeleteModal()" class="btn btn-secondary">Cancel</button>
+            <button id="confirmDeleteBtn" class="btn btn-danger">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                    <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                </svg>
+                Delete Website
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 3rem;
+    }
+
+    .dashboard-header h2 {
+        font-size: 2.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+        color: var(--text-secondary);
+        font-size: 1.125rem;
+    }
+
+    /* Table Styles */
+    .websites-table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+
+    .websites-table thead {
+        background: var(--bg-tertiary);
+    }
+
+    .websites-table th {
+        text-align: left;
+        padding: 1.25rem 1.5rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .websites-table td {
+        padding: 1.25rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        font-size: 1rem;
+    }
+
+    .website-row:last-child td {
+        border-bottom: none;
+    }
+
+    .website-row {
+        transition: background-color 0.2s ease;
+    }
+
+    .website-row:hover {
+        background-color: var(--bg-tertiary);
+    }
+
+    .website-name {
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 1.05rem;
+    }
+
+    .website-url {
+        color: var(--accent-blue);
+        text-decoration: none;
+        transition: color 0.2s ease;
+    }
+
+    .website-url:hover {
+        color: #79c0ff;
+        text-decoration: underline;
+    }
+
+    .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.875rem;
+        padding: 0.375rem 0.75rem;
+        border-radius: 16px;
+        font-weight: 500;
+    }
+
+    .status-active {
+        background-color: rgba(63, 185, 80, 0.15);
+        color: var(--success-green);
+    }
+
+    .status-active::before {
+        content: '';
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: var(--success-green);
+    }
+
+    .date-text {
+        color: var(--text-secondary);
+    }
+
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .btn-icon {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 0.5rem;
+        cursor: pointer;
+        color: var(--text-secondary);
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .btn-icon:hover {
+        background: var(--bg-tertiary);
+        border-color: var(--accent-blue);
+        color: var(--accent-blue);
+    }
+
+    .btn-icon-danger:hover {
+        border-color: var(--danger-red);
+        color: var(--danger-red);
+        background: rgba(248, 81, 73, 0.1);
+    }
+
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 6rem 2rem;
+        background: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+    }
+
+    .empty-icon {
+        margin-bottom: 2rem;
+        opacity: 0.4;
+    }
+
+    .empty-state h3 {
+        font-size: 2rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+    }
+
+    .empty-state p {
+        color: var(--text-secondary);
+        font-size: 1.125rem;
+        max-width: 600px;
+        margin: 0 auto 2rem;
+    }
+
+    /* Modal Styles */
+    .modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.75);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(4px);
+    }
+
+    .modal.active {
+        display: flex;
+    }
+
+    .modal-content {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        width: 90%;
+        max-width: 600px;
+        max-height: 90vh;
+        overflow: auto;
+        animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .modal-header h3 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin: 0;
+    }
+
+    .modal-close {
+        background: transparent;
+        border: none;
+        font-size: 2rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+    }
+
+    .modal-close:hover {
+        background: var(--bg-tertiary);
+        color: var(--text-primary);
+    }
+
+    .modal form {
+        padding: 1.5rem;
+    }
+
+    .form-field {
+        margin-bottom: 1.5rem;
+    }
+
+    .form-field label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        font-size: 1rem;
+        color: var(--text-primary);
+    }
+
+    .form-field input {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background-color: var(--bg-primary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        font-size: 1rem;
+        color: var(--text-primary);
+        transition: all 0.2s ease;
+    }
+
+    .form-field input:focus {
+        outline: none;
+        border-color: var(--accent-blue);
+        box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.1);
+    }
+
+    .modal-footer {
+        display: flex;
+        gap: 1rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border-color);
+        justify-content: flex-end;
+    }
+
+    .modal-footer .btn {
+        min-width: 120px;
+    }
+
+    /* Delete Modal Specific Styles */
+    .modal-danger .modal-content {
+        max-width: 540px;
+    }
+
+    .warning-icon-header {
+        color: var(--warning-yellow);
+        margin-bottom: 1rem;
+    }
+
+    .delete-content {
+        padding: 1.5rem;
+        text-align: center;
+    }
+
+    .delete-content h3 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 1rem;
+    }
+
+    .delete-warning {
+        color: var(--text-secondary);
+        font-size: 1rem;
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+    }
+
+    .delete-preview {
+        background-color: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        padding: 1.25rem;
+        text-align: left;
+        margin-bottom: 0.5rem;
+    }
+
+    .preview-label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.75rem;
+    }
+
+    .preview-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .preview-info strong {
+        font-size: 1.125rem;
+        color: var(--text-primary);
+    }
+
+    .preview-info span {
+        font-size: 0.95rem;
+        color: var(--accent-blue);
+        word-break: break-all;
+    }
+</style>
+
+<script>
+    let currentWebsiteId = null;
+    let deleteWebsiteId = null;
+
+    // Add/Edit Modal Functions
+    function showAddWebsiteModal() {
+        currentWebsiteId = null;
+        document.getElementById('modalTitle').textContent = 'Add Website';
+        document.getElementById('submitButtonText').textContent = 'Add Website';
+        document.getElementById('websiteForm').setAttribute('hx-post', "{% url 'website_add' %}");
+        document.getElementById('name').value = '';
+        document.getElementById('url').value = '';
+        document.getElementById('websiteModal').classList.add('active');
+        htmx.process(document.getElementById('websiteForm'));
+    }
+
+    function showEditWebsiteModal(id, name, url) {
+        currentWebsiteId = id;
+        document.getElementById('modalTitle').textContent = 'Edit Website';
+        document.getElementById('submitButtonText').textContent = 'Save Changes';
+        document.getElementById('websiteForm').setAttribute('hx-post', `/website/${id}/edit/`);
+        document.getElementById('name').value = name;
+        document.getElementById('url').value = url;
+        document.getElementById('websiteModal').classList.add('active');
+        htmx.process(document.getElementById('websiteForm'));
+    }
+
+    function closeWebsiteModal() {
+        document.getElementById('websiteModal').classList.remove('active');
+    }
+
+    // Delete Modal Functions
+    function showDeleteWebsiteModal(id, name, url) {
+        deleteWebsiteId = id;
+        document.getElementById('deleteWebsiteName').textContent = name;
+        document.getElementById('deleteWebsiteUrl').textContent = url;
+        document.getElementById('deleteModal').classList.add('active');
+    }
+
+    function closeDeleteModal() {
+        document.getElementById('deleteModal').classList.remove('active');
+        deleteWebsiteId = null;
+    }
+
+    function confirmDelete() {
+        if (deleteWebsiteId) {
+            fetch(`/website/${deleteWebsiteId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    closeDeleteModal();
+                    window.location.reload();
+                } else {
+                    alert('Failed to delete website');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while deleting the website');
+            });
+        }
+    }
+
+    // Event Listeners
+    document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
+
+    // Close modal when clicking outside
+    document.addEventListener('click', function(event) {
+        const websiteModal = document.getElementById('websiteModal');
+        const deleteModal = document.getElementById('deleteModal');
+
+        if (event.target === websiteModal) {
+            closeWebsiteModal();
+        }
+        if (event.target === deleteModal) {
+            closeDeleteModal();
+        }
+    });
+
+    // Close modal on ESC key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            closeWebsiteModal();
+            closeDeleteModal();
+        }
+    });
+
+    // Handle successful form submission
+    document.body.addEventListener('htmx:afterRequest', function(event) {
+        if (event.detail.successful) {
+            closeWebsiteModal();
+            window.location.reload();
+        }
+    });
+</script>
+{% endblock %}

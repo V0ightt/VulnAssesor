@@ -2,6 +2,34 @@
 
 ## 1. Project Overview
 
+### Technology Stack
+* **Backend Framework:** Django 5.2
+* **Programming Language:** Python 3.14
+* **Frontend Enhancement:** HTMX for dynamic, responsive interactions
+* **Database:** PostgreSQL (production), SQLite (development)
+* **Message Broker:** Redis
+* **Task Queue:** Celery
+* **Containerization:** Docker
+
+### UI/UX Design Specifications
+* **Theme:** Modern dark theme inspired by GitHub's interface
+* **Color Palette:**
+  - Primary Background: `#0d1117` (deep dark)
+  - Secondary Background: `#161b22` (card/panel background)
+  - Tertiary Background: `#21262d` (hover states)
+  - Border Color: `#30363d`
+  - Text Primary: `#c9d1d9` (light gray)
+  - Text Secondary: `#8b949e` (muted gray)
+  - Accent Blue: `#58a6ff` (links, primary actions)
+  - Success Green: `#3fb950`
+  - Warning Yellow: `#d29922`
+  - Danger Red: `#f85149`
+* **Typography:** System font stack for optimal readability
+* **Responsiveness:** Mobile-first design with HTMX-powered dynamic updates
+* **Interactions:** Smooth transitions, hover effects, and real-time updates without page reloads
+
+## Project Overview
+
 The project is a web service designed to be a comprehensive security and monitoring hub for websites.
 
 The primary goal is to allow a user to sign in, add their website, and then perform several key actions:

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vulnerability Assessment Web Service{% endblock %}</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --success-green: #3fb950;
+            --warning-yellow: #d29922;
+            --danger-red: #f85149;
+            --hover-bg: #30363d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background-color: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 1.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .navbar-content {
+            max-width: 1280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .navbar h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .navbar-links {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .navbar-username {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            padding: 0.375rem 0.75rem;
+        }
+
+        .navbar a {
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .navbar a:hover {
+            background-color: var(--hover-bg);
+            color: var(--accent-blue);
+        }
+
+        .container {
+            max-width: 1280px;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+        }
+
+        .messages {
+            margin-bottom: 1.5rem;
+        }
+
+        .message {
+            padding: 0.875rem 1rem;
+            margin-bottom: 0.75rem;
+            border-radius: 6px;
+            border: 1px solid;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.success {
+            background-color: rgba(63, 185, 80, 0.15);
+            border-color: var(--success-green);
+            color: var(--success-green);
+        }
+
+        .message.error {
+            background-color: rgba(248, 81, 73, 0.15);
+            border-color: var(--danger-red);
+            color: var(--danger-red);
+        }
+
+        .message.info {
+            background-color: rgba(88, 166, 255, 0.15);
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .card {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            transition: border-color 0.2s ease;
+        }
+
+        .card:hover {
+            border-color: var(--hover-bg);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.625rem 1.25rem;
+            background-color: var(--accent-blue);
+            color: var(--bg-primary);
+            text-decoration: none;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .btn:hover {
+            background-color: #79c0ff;
+            transform: translateY(-1px);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-danger {
+            background-color: var(--danger-red);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #ff6b6b;
+        }
+
+        .btn-secondary {
+            background-color: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--hover-bg);
+            border-color: var(--text-secondary);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            color: var(--accent-blue);
+            border-color: var(--border-color);
+        }
+
+        .btn-outline:hover {
+            background-color: var(--bg-tertiary);
+            border-color: var(--accent-blue);
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .navbar-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .navbar-links {
+                width: 100%;
+            }
+
+            .container {
+                padding: 0 1rem;
+                margin: 1rem auto;
+            }
+        }
+
+        /* Loading State for HTMX */
+        .htmx-request .htmx-indicator {
+            display: inline-block;
+        }
+
+        .htmx-indicator {
+            display: none;
+        }
+
+        .spinner {
+            border: 2px solid var(--bg-tertiary);
+            border-top: 2px solid var(--accent-blue);
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 0.6s linear infinite;
+            display: inline-block;
+            margin-left: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-content">
+            <div class="navbar-brand">
+                <h1>VulnAssesor</h1>
+            </div>
+            <div class="navbar-links">
+                {% if user.is_authenticated %}
+                    <span class="navbar-username">{{ user.username }}</span>
+                    <a href="{% url 'dashboard' %}">Dashboard</a>
+                    <a href="{% url 'logout' %}">Logout</a>
+                {% else %}
+                    <a href="{% url 'login' %}">Login</a>
+                    <a href="{% url 'register' %}">Register</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% if messages %}
+        <div class="messages" id="messages">
+            {% for message in messages %}
+            <div class="message {{ message.tags }}">
+                {{ message }}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}
+        {% endblock %}
+    </div>
+
+    <script>
+        // Auto-dismiss messages after 5 seconds
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                const messages = document.getElementById('messages');
+                if (messages) {
+                    messages.style.transition = 'opacity 0.5s ease';
+                    messages.style.opacity = '0';
+                    setTimeout(() => messages.remove(), 500);
+                }
+            }, 5000);
+        });
+    </script>
+</body>
+</html>
