@@ -29,4 +29,5 @@ urlpatterns = [
     path('website/add/', views.website_add_view, name='website_add'),
     path('website/<int:pk>/edit/', views.website_edit_view, name='website_edit'),
     path('website/<int:pk>/delete/', views.website_delete_view, name='website_delete'),
+    path('test-celery/', views.test_celery_view, name='test_celery'),
 ]

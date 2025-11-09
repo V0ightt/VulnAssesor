@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -76,8 +77,12 @@ WSGI_APPLICATION = 'VulnAssesor.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_NAME', 'vulnassesor_db'),
+        'USER': os.environ.get('POSTGRES_USER', 'vulnassesor'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'strongpassword'),
+        'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+        'PORT': '5432',
     }
 }
 
@@ -131,3 +136,12 @@ LOGOUT_REDIRECT_URL = 'login'
 # Static Files
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Celery Configuration
+# This points to the 'redis' service in docker-compose.yml
+CELERY_BROKER_URL = 'redis://redis:6379/0'
+CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'

@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: vulnassesor_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=vulnassesor
+      - POSTGRES_PASSWORD=strongpassword
+      - POSTGRES_DB=vulnassesor_db
+    ports:
+      - "5433:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: vulnassesor_redis
+    ports:
+      - "6379:6379"
+
+  web:
+    build: .
+    container_name: vulnassesor_web
+    command: >
+      sh -c "/usr/local/bin/wait-for-db.sh db:5432 60 && \
+             python manage.py migrate && \
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_NAME=vulnassesor_db
+      - POSTGRES_USER=vulnassesor
+      - POSTGRES_PASSWORD=strongpassword
+      - POSTGRES_HOST=db
+    depends_on:
+      - db
+      - redis
+
+  worker:
+    build: .
+    container_name: vulnassesor_worker
+    command: sh -c "/usr/local/bin/wait-for-db.sh db:5432 60 && celery -A VulnAssesor worker -l info"
+    volumes:
+      - .:/app
+    environment:
+      - POSTGRES_NAME=vulnassesor_db
+      - POSTGRES_USER=vulnassesor
+      - POSTGRES_PASSWORD=strongpassword
+      - POSTGRES_HOST=db
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  postgres_data:

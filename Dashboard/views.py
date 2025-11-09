@@ -1,9 +1,11 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login, logout, authenticate
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib import messages
 from django.http import HttpResponse
+from .tasks import simple_test_task
 from .models import Website
 
 # Authentication Views
@@ -85,4 +87,23 @@ def website_delete_view(request, pk):
         website.delete()
         messages.success(request, 'Website deleted successfully!')
         return HttpResponse(status=200)
+    return HttpResponse(status=405)
+
+
+@csrf_exempt
+@login_required
+def test_celery_view(request):
+    """
+    A view to trigger the simple test task.
+    """
+    if request.method == 'POST':
+        # Call the task and make it run for 10 seconds
+        simple_test_task.delay(10)
+
+        # Immediately return an HTMX snippet
+        return HttpResponse("""
+            <div class="message info" role="alert">
+                Task sent to worker! It will run for 10s. Check your worker logs.
+            </div>
+        """)
     return HttpResponse(status=405)

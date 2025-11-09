@@ -14,7 +14,17 @@
         </svg>
         Add Website
     </button>
+    <button class="btn btn-secondary"
+            hx-post="{% url 'test_celery' %}"
+            hx-target="#celery-status"
+            hx-swap="innerHTML">
+        Run 10s Test Task
+        <span class="htmx-indicator spinner"></span>
+    </button>
 </div>
+{% csrf_token %}
+<div id="celery-status" class="messages-container"></div>
+
 
 {% if websites %}
 <table class="websites-table">
