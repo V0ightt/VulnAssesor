@@ -1,0 +1,245 @@
+{% extends 'base.html' %}
+
+{% block title %}Start Scan - {{ website.name }} - VulnAssesor{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <div class="form-header">
+        <h2>Start Vulnerability Scan</h2>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+            </svg>
+            Back to Dashboard
+        </a>
+    </div>
+
+    <div class="scan-info-card">
+        <h3>Target Website</h3>
+        <div class="website-info">
+            <div>
+                <strong>{{ website.name }}</strong>
+                <a href="{{ website.url }}" target="_blank" rel="noopener noreferrer" class="website-url">
+                    {{ website.url }}
+                </a>
+            </div>
+        </div>
+    </div>
+
+    {% if not templates %}
+    <div class="alert alert-warning">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+            <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+        </svg>
+        <div>
+            <strong>No templates available</strong>
+            <p>You need to create at least one Nuclei template before running a scan.</p>
+            <a href="{% url 'template_create' %}" class="btn btn-sm" style="margin-top: 0.5rem;">Create Template</a>
+        </div>
+    </div>
+    {% else %}
+    <form method="post" class="scan-form" x-data="{ selectedTemplates: [] }">
+        {% csrf_token %}
+
+        <div class="form-section">
+            <h3>Select Templates</h3>
+            <p class="section-description">Choose which vulnerability checks to run on this website</p>
+
+            <div class="templates-selection">
+                <div class="templates-toolbar">
+                    <button type="button" @click="selectedTemplates = [{% for t in templates %}{{ t.id }}{% if not forloop.last %},{% endif %}{% endfor %}]" class="btn-link">
+                        Select All
+                    </button>
+                    <button type="button" @click="selectedTemplates = []" class="btn-link">
+                        Deselect All
+                    </button>
+                    <span class="selection-count" x-text="`${selectedTemplates.length} selected`"></span>
+                </div>
+
+                <div class="templates-checkboxes">
+                    {% for template in templates %}
+                    <label class="template-checkbox" :class="{ 'selected': selectedTemplates.includes({{ template.id }}) }">
+                        <input
+                            type="checkbox"
+                            name="templates"
+                            value="{{ template.id }}"
+                            x-model="selectedTemplates">
+                        <div class="checkbox-content">
+                            <div class="checkbox-header">
+                                <span class="checkbox-title">{{ template.name }}</span>
+                            </div>
+                            <p class="checkbox-description">{{ template.description|default:"No description" }}</p>
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn" :disabled="selectedTemplates.length === 0">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+                </svg>
+                Start Scan
+            </button>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<style>
+.scan-info-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.scan-info-card h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.125rem;
+    color: #c9d1d9;
+}
+
+.website-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.website-info strong {
+    display: block;
+    color: #c9d1d9;
+    margin-bottom: 0.25rem;
+}
+
+.alert {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: rgba(217, 153, 34, 0.1);
+    border: 1px solid #d29922;
+    border-radius: 6px;
+    margin-bottom: 2rem;
+}
+
+.alert svg {
+    flex-shrink: 0;
+    color: #d29922;
+}
+
+.alert-warning {
+    background: rgba(217, 153, 34, 0.1);
+    border-color: #d29922;
+}
+
+.scan-form {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 2rem;
+}
+
+.form-section {
+    margin-bottom: 2rem;
+}
+
+.form-section h3 {
+    margin: 0 0 0.5rem 0;
+    color: #c9d1d9;
+}
+
+.section-description {
+    color: #8b949e;
+    margin: 0 0 1.5rem 0;
+}
+
+.templates-toolbar {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #30363d;
+}
+
+.btn-link {
+    background: none;
+    border: none;
+    color: #58a6ff;
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.875rem;
+}
+
+.btn-link:hover {
+    text-decoration: underline;
+}
+
+.selection-count {
+    margin-left: auto;
+    color: #8b949e;
+    font-size: 0.875rem;
+}
+
+.templates-checkboxes {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.template-checkbox {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: #0d1117;
+    border: 2px solid #30363d;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.template-checkbox:hover {
+    border-color: #58a6ff;
+}
+
+.template-checkbox.selected {
+    border-color: #58a6ff;
+    background: rgba(88, 166, 255, 0.1);
+}
+
+.template-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.checkbox-content {
+    flex: 1;
+}
+
+.checkbox-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.checkbox-title {
+    font-weight: 600;
+    color: #c9d1d9;
+}
+
+.checkbox-description {
+    margin: 0;
+    font-size: 0.875rem;
+    color: #8b949e;
+    line-height: 1.5;
+}
+</style>
+{% endblock %}
+

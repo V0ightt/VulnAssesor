@@ -1,0 +1,37 @@
+id: missing-security-headers
+
+info:
+  name: Missing Security Headers Detection
+  author: VulnAssesor
+  severity: medium
+  description: Detects missing security headers that could expose the application to attacks
+  tags: security,headers,misconfiguration
+
+requests:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers-condition: or
+    matchers:
+      - type: dsl
+        name: missing-x-frame-options
+        dsl:
+          - '!contains(tolower(header), "x-frame-options")'
+          - 'status_code == 200'
+        condition: and
+
+      - type: dsl
+        name: missing-csp
+        dsl:
+          - '!contains(tolower(header), "content-security-policy")'
+          - 'status_code == 200'
+        condition: and
+
+      - type: dsl
+        name: missing-xss-protection
+        dsl:
+          - '!contains(tolower(header), "x-xss-protection")'
+          - 'status_code == 200'
+        condition: and
+

@@ -1,0 +1,22 @@
+id: server-information-disclosure
+
+info:
+  name: Server Information Disclosure
+  author: VulnAssesor
+  severity: low
+  description: Detects server version information in response headers
+  tags: disclosure,headers,info
+
+requests:
+  - method: GET
+    path:
+      - "{{BaseURL}}"
+
+    matchers:
+      - type: regex
+        part: header
+        regex:
+          - "Server: .+"
+          - "X-Powered-By: .+"
+        condition: or
+

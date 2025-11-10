@@ -4,3 +4,4 @@ celery
 redis
 psycopg2-binary
 gunicorn
+PyYAML

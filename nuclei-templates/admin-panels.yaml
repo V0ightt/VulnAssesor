@@ -1,0 +1,26 @@
+id: common-admin-panels
+
+info:
+  name: Common Admin Panel Detection
+  author: VulnAssesor
+  severity: info
+  description: Detects common admin panel endpoints
+  tags: admin,discovery,exposure
+
+requests:
+  - method: GET
+    path:
+      - "{{BaseURL}}/admin"
+      - "{{BaseURL}}/admin/"
+      - "{{BaseURL}}/administrator"
+      - "{{BaseURL}}/wp-admin"
+      - "{{BaseURL}}/phpmyadmin"
+      - "{{BaseURL}}/cpanel"
+
+    matchers:
+      - type: status
+        status:
+          - 200
+          - 301
+          - 302
+

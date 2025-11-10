@@ -22,7 +22,10 @@ services:
     container_name: vulnassesor_web
     command: >
       sh -c "/usr/local/bin/wait-for-db.sh db:5432 60 && \
+             python manage.py makemigrations && \
              python manage.py migrate && \
+             python manage.py load_templates && \
+             python manage.py collectstatic --noinput && \
              python manage.py runserver 0.0.0.0:8000"
     volumes:
       - .:/app
