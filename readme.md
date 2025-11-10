@@ -195,4 +195,3 @@ This project is now ready for contributions!
 **Built with ❤️ by Momen Saeb**
 
 *Making web security accessible to everyone.*
-
