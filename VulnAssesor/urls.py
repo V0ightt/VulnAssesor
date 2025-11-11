@@ -41,10 +41,13 @@ urlpatterns = [
     # Scan Management URLs
     path('scan/create/<int:website_pk>/', views.scan_create_view, name='scan_create'),
     path('scan/<int:scan_pk>/status/', views.scan_status_view, name='scan_status'),
+    path('scan/<int:scan_pk>/cancel/', views.scan_cancel_view, name='scan_cancel'),
+    path('scan/<int:scan_pk>/delete/', views.scan_delete_view, name='scan_delete'),
     path('scan/<int:scan_pk>/results/', views.scan_results_view, name='scan_results'),
 
     # Nuclei Configuration URL
     path('nuclei/config/', views.nuclei_config_view, name='nuclei_config'),
+    path('nuclei/update-templates/', views.nuclei_update_templates_view, name='nuclei_update_templates'),
 
     # Testing URLs
     path('test-celery/', views.test_celery_view, name='test_celery'),

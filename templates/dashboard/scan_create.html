@@ -27,23 +27,37 @@
     </div>
 
     {% if not templates %}
-    <div class="alert alert-warning">
+    <div class="alert alert-info">
         <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-            <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+            <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+            <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
         </svg>
         <div>
-            <strong>No templates available</strong>
-            <p>You need to create at least one Nuclei template before running a scan.</p>
-            <a href="{% url 'template_create' %}" class="btn btn-sm" style="margin-top: 0.5rem;">Create Template</a>
+            <strong>No custom templates available</strong>
+            <p>The scan will use Nuclei's default templates. You can create custom templates if needed.</p>
+            <a href="{% url 'template_create' %}" class="btn btn-sm" style="margin-top: 0.5rem;">Create Custom Template</a>
         </div>
     </div>
+
+    <form method="post" class="scan-form">
+        {% csrf_token %}
+        <div class="form-actions">
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+                </svg>
+                Start Scan (Default Templates)
+            </button>
+        </div>
+    </form>
     {% else %}
     <form method="post" class="scan-form" x-data="{ selectedTemplates: [] }">
         {% csrf_token %}
 
         <div class="form-section">
             <h3>Select Templates</h3>
-            <p class="section-description">Choose which vulnerability checks to run on this website</p>
+            <p class="section-description">Choose which vulnerability checks to run on this website (optional - leave empty to use Nuclei default templates)</p>
 
             <div class="templates-selection">
                 <div class="templates-toolbar">
@@ -53,7 +67,7 @@
                     <button type="button" @click="selectedTemplates = []" class="btn-link">
                         Deselect All
                     </button>
-                    <span class="selection-count" x-text="`${selectedTemplates.length} selected`"></span>
+                    <span class="selection-count" x-text="selectedTemplates.length > 0 ? `${selectedTemplates.length} selected` : 'Using default templates'"></span>
                 </div>
 
                 <div class="templates-checkboxes">
@@ -78,11 +92,11 @@
 
         <div class="form-actions">
             <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
-            <button type="submit" class="btn" :disabled="selectedTemplates.length === 0">
+            <button type="submit" class="btn">
                 <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
                     <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
                 </svg>
-                Start Scan
+                <span x-text="selectedTemplates.length > 0 ? 'Start Scan' : 'Start Scan (Default Templates)'"></span>
             </button>
         </div>
     </form>
@@ -134,6 +148,15 @@
 .alert-warning {
     background: rgba(217, 153, 34, 0.1);
     border-color: #d29922;
+}
+
+.alert-info {
+    background: rgba(88, 166, 255, 0.1);
+    border-color: #58a6ff;
+}
+
+.alert-info svg {
+    color: #58a6ff;
 }
 
 .scan-form {

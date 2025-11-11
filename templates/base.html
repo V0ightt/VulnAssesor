@@ -8,6 +8,30 @@
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script defer src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js"></script>
     <link rel="stylesheet" href="{% static 'css/main.css' %}">
+    <script>
+        // Configure HTMX to include CSRF token in all requests
+        document.addEventListener('DOMContentLoaded', function() {
+            document.body.addEventListener('htmx:configRequest', function(event) {
+                event.detail.headers['X-CSRFToken'] = getCookie('csrftoken');
+            });
+        });
+
+        // Get CSRF token from cookie
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
 </head>
 <body>
     <nav class="navbar">
@@ -61,6 +85,23 @@
                     setTimeout(() => messages.remove(), 500);
                 }
             }, 5000);
+        });
+
+        // Configure HTMX to prevent accidental full page navigation
+        document.body.addEventListener('htmx:beforeRequest', function(event) {
+            // Add a subtle indicator that HTMX is updating (not full page reload)
+            const target = event.detail.target;
+            if (target && target.classList.contains('scan-row')) {
+                target.style.opacity = '0.7';
+            }
+        });
+
+        document.body.addEventListener('htmx:afterSwap', function(event) {
+            // Remove the indicator after update
+            const target = event.detail.target;
+            if (target && target.classList.contains('scan-row')) {
+                target.style.opacity = '1';
+            }
         });
     </script>
 </body>

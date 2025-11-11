@@ -3,8 +3,17 @@
     {% if scan.status == 'PENDING' or scan.status == 'RUNNING' %}
     hx-get="{% url 'scan_status' scan.id %}"
     hx-trigger="every 3s"
-    hx-swap="outerHTML"
-    {% endif %}>
+    hx-swap="outerHTML swap:0.2s"
+    {% endif %}
+    style="transition: background-color 0.2s ease;">
+    <td>
+        <input
+            type="checkbox"
+            class="scan-checkbox"
+            id="scan-checkbox-{{ scan.id }}"
+            data-scan-id="{{ scan.id }}"
+            onchange="toggleScanSelection({{ scan.id }})">
+    </td>
     <td>
         <span class="scan-id">#{{ scan.id }}</span>
     </td>
@@ -41,6 +50,13 @@
             </svg>
             Completed
         </span>
+        {% elif scan.status == 'CANCELLED' %}
+        <span class="status-badge status-cancelled">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/>
+            </svg>
+            Cancelled
+        </span>
         {% elif scan.status == 'FAILED' %}
         <span class="status-badge status-failed">
             <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
@@ -68,8 +84,21 @@
             View Results
         </a>
         {% elif scan.status == 'FAILED' %}
-        <button class="btn btn-sm btn-secondary" disabled title="{{ scan.error_message }}">
+        <button
+            class="btn btn-sm btn-secondary"
+            onclick="showErrorModal({{ scan.id }}, '{{ scan.error_message|escapejs }}')">
             Error Details
+        </button>
+        {% elif scan.status == 'CANCELLED' %}
+        <span class="text-muted">Cancelled{% if scan.cancelled_by %} by {{ scan.cancelled_by.username }}{% endif %}</span>
+        {% elif scan.status == 'PENDING' or scan.status == 'RUNNING' %}
+        <button
+            class="btn btn-sm btn-danger"
+            hx-post="{% url 'scan_cancel' scan.id %}"
+            hx-swap="outerHTML"
+            hx-target="closest tr"
+            hx-confirm="Are you sure you want to cancel this scan?">
+            Cancel Scan
         </button>
         {% else %}
         <span class="text-muted">In progress...</span>

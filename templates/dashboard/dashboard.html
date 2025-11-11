@@ -28,13 +28,36 @@
 <!-- Recent Scans Section -->
 {% if recent_scans %}
 <div class="section-header">
-    <h3>Recent Scans</h3>
-    <p class="subtitle">Latest vulnerability scans across your websites</p>
+    <div>
+        <h3>Recent Scans</h3>
+        <p class="subtitle">Latest vulnerability scans across your websites</p>
+    </div>
+    <div style="display: flex; align-items: center; gap: 1rem;">
+        <span id="selection-count" style="color: #8b949e; font-size: 0.875rem;"></span>
+        <button
+            id="delete-selected-scans-btn"
+            onclick="showDeleteScansModal()"
+            class="btn btn-danger"
+            style="display: none;">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+            </svg>
+            Delete Selected
+        </button>
+    </div>
 </div>
 
 <table class="scans-table">
     <thead>
         <tr>
+            <th style="width: 40px;">
+                <input
+                    type="checkbox"
+                    id="select-all-scans"
+                    onchange="toggleSelectAll()"
+                    title="Select all scans">
+            </th>
             <th>ID</th>
             <th>Website</th>
             <th>Status</th>
@@ -278,12 +301,200 @@
         }
     });
 
-    // Handle successful form submission
+    // Handle successful form submission (only for website operations)
     document.body.addEventListener('htmx:afterRequest', function(event) {
         if (event.detail.successful) {
-            closeWebsiteModal();
-            window.location.reload();
+            // Only reload for website add/edit forms, not for scan status updates
+            const target = event.detail.elt;
+            if (target && (target.id === 'websiteForm' || target.closest('#websiteModal'))) {
+                closeWebsiteModal();
+                window.location.reload();
+            }
         }
     });
 </script>
+
+<!-- Error Details Modal -->
+<div id="errorModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <svg width="24" height="24" fill="currentColor" viewBox="0 0 16 16" style="color: #f85149;">
+                    <path d="M16 8A8 8 0 1 1 0 8a8 8 0 0 1 16 0zM5.354 4.646a.5.5 0 1 0-.708.708L7.293 8l-2.647 2.646a.5.5 0 0 0 .708.708L8 8.707l2.646 2.647a.5.5 0 0 0 .708-.708L8.707 8l2.647-2.646a.5.5 0 0 0-.708-.708L8 7.293 5.354 4.646z"/>
+                </svg>
+                <h3>Scan Failed - Error Details</h3>
+            </div>
+            <button onclick="closeErrorModal()" class="btn-icon">
+                <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div style="background: rgba(248, 81, 73, 0.1); border: 1px solid #f85149; border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+                <p style="margin: 0; color: #c9d1d9;">
+                    <strong style="color: #f85149;">Scan ID:</strong> <span id="errorScanId"></span>
+                </p>
+            </div>
+            <div style="background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 1rem;">
+                <p style="margin: 0 0 0.5rem 0; color: #8b949e; font-size: 0.875rem; font-weight: 600;">ERROR MESSAGE:</p>
+                <pre style="margin: 0; color: #c9d1d9; font-family: 'Courier New', monospace; font-size: 0.875rem; white-space: pre-wrap; word-wrap: break-word;" id="errorMessage"></pre>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeErrorModal()" class="btn">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Scans Modal -->
+<div id="deleteScansModal" class="modal">
+    <div class="modal-content modal-danger">
+        <div class="modal-header">
+            <div class="warning-icon-header">
+                <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                </svg>
+            </div>
+            <button onclick="closeDeleteScansModal()" class="modal-close">&times;</button>
+        </div>
+        <div class="delete-content">
+            <h3>Delete Scans</h3>
+            <p class="delete-warning">Are you sure you want to delete the selected scan(s)? This action cannot be undone.</p>
+            <div class="delete-preview">
+                <div class="preview-label">You are about to delete:</div>
+                <div class="preview-info">
+                    <strong id="deleteScansCount"></strong> scan(s)
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeDeleteScansModal()" class="btn btn-secondary">Cancel</button>
+            <button onclick="confirmDeleteScans()" class="btn btn-danger">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                    <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                </svg>
+                Delete Scans
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Error Modal Functions
+    function showErrorModal(scanId, errorMessage) {
+        document.getElementById('errorScanId').textContent = '#' + scanId;
+        document.getElementById('errorMessage').textContent = errorMessage || 'No error message available';
+        document.getElementById('errorModal').classList.add('active');
+    }
+
+    function closeErrorModal() {
+        document.getElementById('errorModal').classList.remove('active');
+    }
+
+    // Scan Deletion Functions
+    let selectedScanIds = new Set();
+
+    function toggleScanSelection(scanId) {
+        const checkbox = document.getElementById(`scan-checkbox-${scanId}`);
+        if (checkbox.checked) {
+            selectedScanIds.add(scanId);
+        } else {
+            selectedScanIds.delete(scanId);
+        }
+        updateSelectionUI();
+    }
+
+    function toggleSelectAll() {
+        const selectAllCheckbox = document.getElementById('select-all-scans');
+        const scanCheckboxes = document.querySelectorAll('.scan-checkbox');
+
+        scanCheckboxes.forEach(checkbox => {
+            checkbox.checked = selectAllCheckbox.checked;
+            const scanId = parseInt(checkbox.dataset.scanId);
+            if (selectAllCheckbox.checked) {
+                selectedScanIds.add(scanId);
+            } else {
+                selectedScanIds.delete(scanId);
+            }
+        });
+
+        updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+        const deleteButton = document.getElementById('delete-selected-scans-btn');
+        const selectionCount = document.getElementById('selection-count');
+
+        if (selectedScanIds.size > 0) {
+            deleteButton.style.display = 'inline-flex';
+            selectionCount.textContent = `${selectedScanIds.size} selected`;
+        } else {
+            deleteButton.style.display = 'none';
+            selectionCount.textContent = '';
+        }
+    }
+
+    function showDeleteScansModal() {
+        if (selectedScanIds.size === 0) return;
+        document.getElementById('deleteScansCount').textContent = selectedScanIds.size;
+        document.getElementById('deleteScansModal').classList.add('active');
+    }
+
+    function closeDeleteScansModal() {
+        document.getElementById('deleteScansModal').classList.remove('active');
+    }
+
+    function confirmDeleteScans() {
+        const scanIds = Array.from(selectedScanIds);
+        const csrfToken = getCookie('csrftoken');
+
+        // Delete scans one by one
+        Promise.all(scanIds.map(scanId =>
+            fetch(`/scan/${scanId}/delete/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                }
+            })
+        )).then(responses => {
+            const allSuccess = responses.every(r => r.ok);
+            if (allSuccess) {
+                // Remove rows from DOM
+                scanIds.forEach(scanId => {
+                    const row = document.getElementById(`scan-${scanId}`);
+                    if (row) row.remove();
+                });
+                selectedScanIds.clear();
+                updateSelectionUI();
+                closeDeleteScansModal();
+
+                // Uncheck select all
+                const selectAllCheckbox = document.getElementById('select-all-scans');
+                if (selectAllCheckbox) selectAllCheckbox.checked = false;
+            } else {
+                alert('Some scans could not be deleted. Please try again.');
+            }
+        }).catch(error => {
+            console.error('Delete error:', error);
+            alert('An error occurred while deleting scans.');
+        });
+    }
+
+    // Close modals when clicking outside
+    document.addEventListener('click', function(event) {
+        const errorModal = document.getElementById('errorModal');
+        const deleteScansModal = document.getElementById('deleteScansModal');
+
+        if (event.target === errorModal) {
+            closeErrorModal();
+        }
+        if (event.target === deleteScansModal) {
+            closeDeleteScansModal();
+        }
+    });
+</script>
+
 {% endblock %}

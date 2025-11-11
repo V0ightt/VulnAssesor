@@ -5,8 +5,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
+from django.utils import timezone
 from .tasks import simple_test_task, run_specialist_scan
 from .models import Website, NucleiTemplate, ScanJob, ScanResult, NucleiConfig
+import subprocess
+from celery.result import AsyncResult
+from VulnAssesor.celery import app as celery_app
 
 # Authentication Views
 
@@ -47,7 +51,16 @@ def logout_view(request):
 @login_required
 def dashboard_view(request):
     websites = Website.objects.filter(owner=request.user)
-    recent_scans = ScanJob.objects.filter(website__owner=request.user)[:10]
+
+    # Optimize query with select_related and prefetch_related
+    recent_scans = ScanJob.objects.filter(
+        website__owner=request.user
+    ).select_related(
+        'website', 'cancelled_by'
+    ).prefetch_related(
+        'results'
+    ).order_by('-created_at')[:10]
+
     return render(request, 'dashboard/dashboard.html', {
         'websites': websites,
         'recent_scans': recent_scans,
@@ -192,8 +205,9 @@ def template_delete_view(request, pk):
         template_name = template.name
         template.delete()
 
-        if request.headers.get('HX-Request'):
-            # Return HTMX response
+        # Check if this is an HTMX or AJAX request (case-insensitive header check)
+        if request.headers.get('HX-Request') or request.headers.get('Hx-Request') or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            # Return success response for AJAX/HTMX
             return HttpResponse(status=200)
         else:
             messages.success(request, f'Template "{template_name}" deleted successfully!')
@@ -215,19 +229,19 @@ def scan_create_view(request, website_pk):
         # Get selected template IDs from the form
         template_ids = request.POST.getlist('templates')
 
-        if not template_ids:
-            messages.error(request, 'Please select at least one template.')
-            return redirect('dashboard')
+        # Validate that all templates belong to the user (only if templates are selected)
+        if template_ids:
+            templates = NucleiTemplate.objects.filter(
+                id__in=template_ids,
+                owner=request.user
+            )
 
-        # Validate that all templates belong to the user
-        templates = NucleiTemplate.objects.filter(
-            id__in=template_ids,
-            owner=request.user
-        )
-
-        if templates.count() != len(template_ids):
-            messages.error(request, 'Invalid template selection.')
-            return redirect('dashboard')
+            if templates.count() != len(template_ids):
+                messages.error(request, 'Invalid template selection.')
+                return redirect('dashboard')
+        else:
+            # No templates selected - will use Nuclei default templates
+            messages.info(request, 'No templates selected. Using Nuclei default templates.')
 
         # Create the scan job
         job = ScanJob.objects.create(
@@ -236,7 +250,7 @@ def scan_create_view(request, website_pk):
         )
 
         # Dispatch the task to Celery
-        run_specialist_scan.delay(job.id, list(map(int, template_ids)))
+        run_specialist_scan.delay(job.id, list(map(int, template_ids)) if template_ids else [])
 
         messages.success(request, f'Scan started for {website.name}!')
 
@@ -258,10 +272,17 @@ def scan_create_view(request, website_pk):
 def scan_status_view(request, scan_pk):
     """
     Return the current status of a scan job (for HTMX polling).
+    Optimized to only fetch necessary data.
     """
-    scan = get_object_or_404(ScanJob, pk=scan_pk, website__owner=request.user)
+    # Use select_related to avoid N+1 queries
+    scan = get_object_or_404(
+        ScanJob.objects.select_related('website', 'cancelled_by'),
+        pk=scan_pk,
+        website__owner=request.user
+    )
 
-    if request.headers.get('HX-Request'):
+    # Check if this is an HTMX request (case-insensitive header check)
+    if request.headers.get('HX-Request') or request.headers.get('Hx-Request'):
         return render(request, 'dashboard/scan_row.html', {'scan': scan})
 
     return JsonResponse({
@@ -273,11 +294,83 @@ def scan_status_view(request, scan_pk):
 
 
 @login_required
+def scan_cancel_view(request, scan_pk):
+    """
+    Cancel a running or pending scan.
+    """
+    scan = get_object_or_404(ScanJob, pk=scan_pk, website__owner=request.user)
+
+    if request.method == 'POST':
+        # Only allow cancelling pending or running scans
+        if scan.status in ['PENDING', 'RUNNING']:
+            # Update scan status
+            scan.status = 'CANCELLED'
+            scan.cancelled_by = request.user
+            scan.completed_at = timezone.now()
+            scan.save()
+
+            # Try to revoke the Celery task if it exists
+            if scan.celery_task_id:
+                try:
+                    celery_app.control.revoke(scan.celery_task_id, terminate=True, signal='SIGKILL')
+                    print(f"[Cancel] Revoked Celery task {scan.celery_task_id}")
+                except Exception as e:
+                    print(f"[Cancel] Failed to revoke task: {e}")
+
+            # Refresh the scan object to get updated related objects
+            scan.refresh_from_db()
+
+            # Return HTMX response with updated row (check for HTMX request)
+            if request.headers.get('HX-Request') or request.headers.get('Hx-Request'):
+                return render(request, 'dashboard/scan_row.html', {'scan': scan})
+
+            messages.success(request, f'Scan #{scan.id} has been cancelled.')
+            return redirect('dashboard')
+        else:
+            messages.error(request, 'This scan cannot be cancelled.')
+
+            # Return current scan row for HTMX
+            if request.headers.get('HX-Request') or request.headers.get('Hx-Request'):
+                return render(request, 'dashboard/scan_row.html', {'scan': scan})
+
+            return redirect('dashboard')
+
+    return HttpResponse(status=405)
+
+
+@login_required
+def scan_delete_view(request, scan_pk):
+    """
+    Delete a scan and its results.
+    """
+    scan = get_object_or_404(ScanJob, pk=scan_pk, website__owner=request.user)
+
+    if request.method == 'POST':
+        scan_id = scan.id
+        scan.delete()  # This will cascade delete all related ScanResults
+
+        # Check if this is an AJAX request
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.headers.get('HX-Request') or request.headers.get('Hx-Request'):
+            return HttpResponse(status=200)
+        else:
+            messages.success(request, f'Scan #{scan_id} deleted successfully!')
+            return redirect('dashboard')
+
+    return HttpResponse(status=405)
+
+
+@login_required
 def scan_results_view(request, scan_pk):
     """
     Display detailed results of a completed scan.
     """
-    scan = get_object_or_404(ScanJob, pk=scan_pk, website__owner=request.user)
+    scan = get_object_or_404(
+        ScanJob.objects.select_related('website'),
+        pk=scan_pk,
+        website__owner=request.user
+    )
+
+    # Optimize results query - fetch only needed fields
     results = scan.results.all().order_by('-severity', '-created_at')
 
     # Group results by severity for better visualization
@@ -316,6 +409,7 @@ def nuclei_config_view(request):
             config.rate_limit = int(request.POST.get('rate_limit', config.rate_limit))
             config.concurrency = int(request.POST.get('concurrency', config.concurrency))
             config.retries = int(request.POST.get('retries', config.retries))
+            config.max_host_errors = int(request.POST.get('max_host_errors', config.max_host_errors))
 
             config.silent_mode = request.POST.get('silent_mode') == 'on'
             config.no_color = request.POST.get('no_color') == 'on'
@@ -340,3 +434,47 @@ def nuclei_config_view(request):
         'config': config,
         'example_command': ' '.join(example_command),
     })
+
+
+@login_required
+def nuclei_update_templates_view(request):
+    """
+    Update Nuclei default templates using nuclei -ut command.
+    """
+    if request.method == 'POST':
+        try:
+            print("[Nuclei Update] Starting nuclei template update...")
+
+            # Run nuclei -ut command to update templates
+            result = subprocess.run(
+                ['nuclei', '-ut'],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+
+            print(f"[Nuclei Update] Command completed with return code: {result.returncode}")
+
+            if result.stdout:
+                print(f"[Nuclei Update] Output: {result.stdout}")
+
+            if result.stderr:
+                print(f"[Nuclei Update] Stderr: {result.stderr}")
+
+            if result.returncode == 0:
+                messages.success(request, 'Nuclei templates updated successfully!')
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                messages.warning(request, f'Nuclei template update completed with warnings. Check logs for details.')
+
+        except subprocess.TimeoutExpired:
+            messages.error(request, 'Template update timed out after 5 minutes.')
+        except FileNotFoundError:
+            messages.error(request, 'Nuclei command not found. Make sure Nuclei is installed.')
+        except Exception as e:
+            messages.error(request, f'Failed to update templates: {str(e)}')
+
+        return redirect('nuclei_config')
+
+    return HttpResponse(status=405)
+

@@ -541,6 +541,11 @@ body {
 /* Section Header */
 .section-header {
     margin: 3rem 0 1.5rem 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
 }
 
 .section-header h3 {
@@ -594,6 +599,20 @@ body {
     background-color: var(--bg-tertiary);
 }
 
+.scan-checkbox {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-blue);
+}
+
+#select-all-scans {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-blue);
+}
+
 .scan-id {
     font-family: monospace;
     color: var(--text-secondary);
@@ -629,6 +648,11 @@ body {
     color: var(--danger-red);
 }
 
+.status-cancelled {
+    background-color: rgba(139, 148, 158, 0.15);
+    color: var(--text-secondary);
+}
+
 .results-count {
     color: var(--text-primary);
     font-weight: 500;
@@ -641,6 +665,16 @@ body {
 .btn-sm {
     padding: 0.375rem 0.75rem;
     font-size: 0.875rem;
+}
+
+.btn-danger {
+    background-color: var(--danger-red);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #da3633;
+    color: white;
 }
 
 /* Empty State */

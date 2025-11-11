@@ -23,6 +23,37 @@ def simple_test_task(task_duration_seconds):
     return f"Task complete after {task_duration_seconds} seconds."
 
 
+def check_cancellation_and_wait(job, process, config, command):
+    """
+    Helper function to poll process and check for cancellation.
+    Returns the process result or raises appropriate exceptions.
+    """
+    start_time = time.time()
+    while process.poll() is None:
+        # Check for timeout
+        if time.time() - start_time > config.timeout:
+            process.kill()
+            raise subprocess.TimeoutExpired(command, config.timeout)
+
+        # Refresh job status from DB and check for cancellation
+        job.refresh_from_db()
+        if job.status == 'CANCELLED':
+            print(f"[Specialist] Job {job.id} was cancelled during execution")
+            process.kill()
+            process.wait(timeout=5)
+            return None  # Signal cancellation
+
+        time.sleep(2)
+
+    # Get output
+    stdout, stderr = process.communicate(timeout=5)
+    return type('Result', (), {
+        'returncode': process.returncode,
+        'stdout': stdout,
+        'stderr': stderr
+    })()
+
+
 @shared_task(bind=True)
 def run_specialist_scan(self, job_id, template_ids):
     """
@@ -30,7 +61,7 @@ def run_specialist_scan(self, job_id, template_ids):
 
     Args:
         job_id: ID of the ScanJob to process
-        template_ids: List of NucleiTemplate IDs to use for scanning
+        template_ids: List of NucleiTemplate IDs to use for scanning (empty list uses default templates)
 
     Returns:
         dict: Summary of the scan results
@@ -41,6 +72,11 @@ def run_specialist_scan(self, job_id, template_ids):
         # Get the ScanJob object
         job = ScanJob.objects.get(id=job_id)
 
+        # Check if job was cancelled before we even started
+        if job.status == 'CANCELLED':
+            print(f"[Specialist] Job {job_id} was cancelled before execution")
+            return {'status': 'cancelled', 'message': 'Scan was cancelled'}
+
         # Update job status to RUNNING and save Celery task ID
         job.status = 'RUNNING'
         job.celery_task_id = self.request.id
@@ -48,131 +84,217 @@ def run_specialist_scan(self, job_id, template_ids):
 
         print(f"[Specialist] Job {job_id} status updated to RUNNING")
 
-        # Create a temporary directory to store templates
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
+        # Get Nuclei configuration
+        config = NucleiConfig.get_config()
 
-            # Fetch the NucleiTemplate objects and write them to files
-            templates = NucleiTemplate.objects.filter(id__in=template_ids)
+        # Check if we should use default templates or custom templates
+        use_default_templates = not template_ids or len(template_ids) == 0
 
-            if not templates.exists():
-                raise ValueError("No valid templates found")
+        # Initialize result variable
+        result = None
 
-            print(f"[Specialist] Writing {templates.count()} templates to {temp_dir}")
+        if use_default_templates:
+            print(f"[Specialist] Using Nuclei default templates")
 
-            for template in templates:
-                # Create a safe filename from the template name
-                # Remove any special characters that might cause issues
-                safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in template.name)
-                filename = f"{template.id}_{safe_name}.yaml"
-                template_file = temp_path / filename
+            # Build the Nuclei command without custom templates
+            command = config.build_command(job.website.url, None)
 
-                # Write the template content to the file with explicit encoding
-                template_file.write_text(template.template_content, encoding='utf-8')
-                print(f"[Specialist] Created template file: {filename}")
-                print(f"[Specialist] Template file path: {template_file}")
-                print(f"[Specialist] Template file exists: {template_file.exists()}")
-                print(f"[Specialist] Template file size: {template_file.stat().st_size} bytes")
-
-            # List all files in temp directory for debugging
-            files_in_temp = list(temp_path.glob('*.yaml'))
-            print(f"[Specialist] Total YAML files in temp dir: {len(files_in_temp)}")
-            for f in files_in_temp:
-                print(f"[Specialist]   - {f.name}")
-
-            # Get Nuclei configuration
-            config = NucleiConfig.get_config()
-
-            # Build the Nuclei command using configuration
-            command = config.build_command(job.website.url, str(temp_path))
-
+            # Execute Nuclei with cancellation support
             print(f"[Specialist] Executing command: {' '.join(command)}")
-            print(f"[Specialist] Template directory: {temp_path}")
-            print(f"[Specialist] Template directory exists: {temp_path.exists()}")
-
-            # Execute Nuclei with configured timeout
-            result = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                capture_output=True,
-                text=True,
-                timeout=config.timeout  # Use configured timeout
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
 
-            print(f"[Specialist] Nuclei execution completed with return code: {result.returncode}")
+            # Poll process and check for cancellation
+            stdout_lines = []
+            stderr_lines = []
 
-            # Log stderr for debugging
-            if result.stderr:
-                print(f"[Specialist] Nuclei stderr output:")
-                print(result.stderr)
+            try:
+                # Wait with timeout and periodic cancellation checks
+                start_time = time.time()
+                while process.poll() is None:
+                    # Check for cancellation every 2 seconds
+                    if time.time() - start_time > config.timeout:
+                        process.kill()
+                        raise subprocess.TimeoutExpired(command, config.timeout)
 
-            # Check if Nuclei reported an error
-            if result.returncode != 0:
-                error_details = result.stderr if result.stderr else "No error details available"
-                print(f"[Specialist] WARNING: Nuclei exited with code {result.returncode}")
-                print(f"[Specialist] Error details: {error_details}")
+                    # Refresh job status from DB
+                    job.refresh_from_db()
+                    if job.status == 'CANCELLED':
+                        print(f"[Specialist] Job {job_id} was cancelled during execution")
+                        process.kill()
+                        process.wait(timeout=5)
+                        return {'status': 'cancelled', 'message': 'Scan was cancelled by user'}
 
-                # Check for common issues
-                if "no templates provided" in error_details.lower():
-                    print(f"[Specialist] ERROR: Nuclei couldn't find templates in {temp_path}")
-                    print(f"[Specialist] Files in directory: {list(temp_path.glob('*'))}")
-                    # Continue anyway to save error info
+                    time.sleep(2)
 
-            # Process the output
-            findings_count = 0
+                # Get output
+                stdout, stderr = process.communicate(timeout=5)
+                result = type('Result', (), {
+                    'returncode': process.returncode,
+                    'stdout': stdout,
+                    'stderr': stderr
+                })()
 
-            if result.stdout:
-                # Each line in stdout is a JSON object representing a finding
-                for line in result.stdout.strip().split('\n'):
-                    if not line.strip():
-                        continue
+            except subprocess.TimeoutExpired:
+                process.kill()
+                raise
+        else:
+            # Create a temporary directory to store custom templates
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_path = Path(temp_dir)
 
-                    try:
-                        finding = json.loads(line)
+                # Fetch the NucleiTemplate objects and write them to files
+                templates = NucleiTemplate.objects.filter(id__in=template_ids)
 
-                        # Extract relevant information from the Nuclei output
-                        # Nuclei JSON structure: https://docs.projectdiscovery.io/tools/nuclei/running#json-output
-                        template_id = finding.get('template-id', 'unknown')
-                        template_name = finding.get('template', template_id)
-                        info = finding.get('info', {})
-                        vulnerability_name = info.get('name', template_id)
-                        severity = info.get('severity', 'info').lower()
-                        matched_at = finding.get('matched-at', job.website.url)
+                if not templates.exists():
+                    raise ValueError("No valid templates found")
 
-                        # Create a ScanResult object
-                        ScanResult.objects.create(
-                            job=job,
-                            template_name=template_name,
-                            vulnerability_name=vulnerability_name,
-                            severity=severity,
-                            target_url=matched_at,
-                            raw_finding=finding
-                        )
+                print(f"[Specialist] Writing {templates.count()} templates to {temp_dir}")
 
-                        findings_count += 1
-                        print(f"[Specialist] Found: {vulnerability_name} ({severity}) at {matched_at}")
+                for template in templates:
+                    # Create a safe filename from the template name
+                    # Remove any special characters that might cause issues
+                    safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in template.name)
+                    filename = f"{template.id}_{safe_name}.yaml"
+                    template_file = temp_path / filename
 
-                    except json.JSONDecodeError as e:
-                        print(f"[Specialist] Failed to parse JSON line: {line[:100]}... Error: {e}")
-                        continue
+                    # Write the template content to the file with explicit encoding
+                    template_file.write_text(template.template_content, encoding='utf-8')
+                    print(f"[Specialist] Created template file: {filename}")
+                    print(f"[Specialist] Template file path: {template_file}")
+                    print(f"[Specialist] Template file exists: {template_file.exists()}")
+                    print(f"[Specialist] Template file size: {template_file.stat().st_size} bytes")
 
-            # Check for errors in stderr
-            if result.stderr:
-                print(f"[Specialist] Nuclei stderr: {result.stderr}")
+                # List all files in temp directory for debugging
+                files_in_temp = list(temp_path.glob('*.yaml'))
+                print(f"[Specialist] Total YAML files in temp dir: {len(files_in_temp)}")
+                for f in files_in_temp:
+                    print(f"[Specialist]   - {f.name}")
 
-            # Update job status to COMPLETED
-            job.status = 'COMPLETED'
-            job.completed_at = timezone.now()
-            job.save()
+                # Build the Nuclei command using configuration
+                command = config.build_command(job.website.url, str(temp_path))
 
-            summary = {
-                'job_id': job_id,
-                'status': 'success',
-                'findings_count': findings_count,
-                'target': job.website.url,
-            }
+                print(f"[Specialist] Executing command: {' '.join(command)}")
+                print(f"[Specialist] Template directory: {temp_path}")
+                print(f"[Specialist] Template directory exists: {temp_path.exists()}")
 
-            print(f"[Specialist] Scan completed successfully. Found {findings_count} vulnerabilities.")
-            return summary
+                # Execute Nuclei with cancellation support
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                # Poll process and check for cancellation
+                try:
+                    start_time = time.time()
+                    while process.poll() is None:
+                        # Check for timeout
+                        if time.time() - start_time > config.timeout:
+                            process.kill()
+                            raise subprocess.TimeoutExpired(command, config.timeout)
+
+                        # Refresh job status from DB and check for cancellation
+                        job.refresh_from_db()
+                        if job.status == 'CANCELLED':
+                            print(f"[Specialist] Job {job_id} was cancelled during execution")
+                            process.kill()
+                            process.wait(timeout=5)
+                            return {'status': 'cancelled', 'message': 'Scan was cancelled by user'}
+
+                        time.sleep(2)
+
+                    # Get output
+                    stdout, stderr = process.communicate(timeout=5)
+                    result = type('Result', (), {
+                        'returncode': process.returncode,
+                        'stdout': stdout,
+                        'stderr': stderr
+                    })()
+
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    raise
+
+        print(f"[Specialist] Nuclei execution completed with return code: {result.returncode}")
+
+        # Log stderr for debugging
+        if result.stderr:
+            print(f"[Specialist] Nuclei stderr output:")
+            print(result.stderr)
+
+        # Check if Nuclei reported an error
+        if result.returncode != 0:
+            error_details = result.stderr if result.stderr else "No error details available"
+            print(f"[Specialist] WARNING: Nuclei exited with code {result.returncode}")
+            print(f"[Specialist] Error details: {error_details}")
+
+            # Check for common issues
+            if "no templates provided" in error_details.lower():
+                print(f"[Specialist] ERROR: Nuclei couldn't find templates")
+                # Continue anyway to save error info
+
+        # Process the output
+        findings_count = 0
+
+        if result.stdout:
+            # Each line in stdout is a JSON object representing a finding
+            for line in result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+
+                try:
+                    finding = json.loads(line)
+
+                    # Extract relevant information from the Nuclei output
+                    # Nuclei JSON structure: https://docs.projectdiscovery.io/tools/nuclei/running#json-output
+                    template_id = finding.get('template-id', 'unknown')
+                    template_name = finding.get('template', template_id)
+                    info = finding.get('info', {})
+                    vulnerability_name = info.get('name', template_id)
+                    severity = info.get('severity', 'info').lower()
+                    matched_at = finding.get('matched-at', job.website.url)
+
+                    # Create a ScanResult object
+                    ScanResult.objects.create(
+                        job=job,
+                        template_name=template_name,
+                        vulnerability_name=vulnerability_name,
+                        severity=severity,
+                        target_url=matched_at,
+                        raw_finding=finding
+                    )
+
+                    findings_count += 1
+                    print(f"[Specialist] Found: {vulnerability_name} ({severity}) at {matched_at}")
+
+                except json.JSONDecodeError as e:
+                    print(f"[Specialist] Failed to parse JSON line: {line[:100]}... Error: {e}")
+                    continue
+
+        # Check for errors in stderr
+        if result.stderr:
+            print(f"[Specialist] Nuclei stderr: {result.stderr}")
+
+        # Update job status to COMPLETED
+        job.status = 'COMPLETED'
+        job.completed_at = timezone.now()
+        job.save()
+
+        summary = {
+            'job_id': job_id,
+            'status': 'success',
+            'findings_count': findings_count,
+            'target': job.website.url,
+        }
+
+        print(f"[Specialist] Scan completed successfully. Found {findings_count} vulnerabilities.")
+        return summary
 
     except ScanJob.DoesNotExist:
         error_msg = f"ScanJob with id {job_id} does not exist"
@@ -183,10 +305,16 @@ def run_specialist_scan(self, job_id, template_ids):
         config = NucleiConfig.get_config()
         error_msg = f"Scan timed out after {config.timeout} seconds"
         print(f"[Specialist] ERROR: {error_msg}")
-        job.status = 'FAILED'
-        job.error_message = error_msg
-        job.completed_at = timezone.now()
-        job.save()
+
+        try:
+            job = ScanJob.objects.get(id=job_id)
+            job.status = 'FAILED'
+            job.error_message = error_msg
+            job.completed_at = timezone.now()
+            job.save()
+        except:
+            pass
+
         return {'status': 'error', 'message': error_msg}
 
     except Exception as e:

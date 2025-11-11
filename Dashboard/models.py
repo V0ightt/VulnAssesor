@@ -60,6 +60,11 @@ class NucleiConfig(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(10)],
         help_text="Number of times to retry a failed request (0-10)"
     )
+    max_host_errors = models.IntegerField(
+        default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(100)],
+        help_text="Maximum errors before stopping scan on a host (1-100)"
+    )
     follow_redirects = models.BooleanField(
         default=True,
         help_text="Follow HTTP redirects"
@@ -108,7 +113,7 @@ class NucleiConfig(models.Model):
 
         Args:
             target_url: The target website URL
-            templates_path: Path to the templates directory
+            templates_path: Path to the templates directory (None to use default templates)
 
         Returns:
             list: Command arguments for subprocess
@@ -118,8 +123,9 @@ class NucleiConfig(models.Model):
         # Target
         command.extend(['-target', target_url])
 
-        # Templates
-        command.extend(['-t', str(templates_path)])
+        # Templates - only specify if custom templates provided
+        if templates_path is not None:
+            command.extend(['-t', str(templates_path)])
 
         # Output format
         if self.jsonl_output:
@@ -146,6 +152,9 @@ class NucleiConfig(models.Model):
         # Follow redirects
         if not self.follow_redirects:
             command.append('-no-follow-redirects')
+
+        # Max host errors - prevent infinite scanning on problematic hosts
+        command.extend(['-max-host-error', str(self.max_host_errors)])
 
         # Timeout (in seconds)
         command.extend(['-timeout', str(self.timeout)])
@@ -189,6 +198,7 @@ class ScanJob(models.Model):
         ('RUNNING', 'Running'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
     ]
 
     website = models.ForeignKey(Website, on_delete=models.CASCADE, related_name='scan_jobs')
@@ -197,6 +207,7 @@ class ScanJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(blank=True, null=True)
     error_message = models.TextField(blank=True, null=True, help_text="Error details if scan failed")
+    cancelled_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cancelled_scans')
 
     def __str__(self):
         return f"Scan #{self.id} - {self.website.name} ({self.status})"
@@ -205,6 +216,11 @@ class ScanJob(models.Model):
         ordering = ['-created_at']
         verbose_name = "Scan Job"
         verbose_name_plural = "Scan Jobs"
+        indexes = [
+            models.Index(fields=['-created_at', 'status']),
+            models.Index(fields=['status']),
+            models.Index(fields=['celery_task_id']),
+        ]
 
 
 class ScanResult(models.Model):
@@ -234,4 +250,8 @@ class ScanResult(models.Model):
         ordering = ['-created_at']
         verbose_name = "Scan Result"
         verbose_name_plural = "Scan Results"
+        indexes = [
+            models.Index(fields=['job', 'severity']),
+            models.Index(fields=['severity', '-created_at']),
+        ]
 
