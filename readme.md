@@ -187,8 +187,8 @@ This project is now ready for contributions!
 
 - **Issues:** [GitHub Issues](link-to-issues)
 - **Discussions:** [GitHub Discussions](link-to-discussions)
-- **Discord:** [your-email]
-- **LinkedIn:** [your-email]
+- **Discord:** v0ight_
+- **LinkedIn:** [Here](https://www.linkedin.com/in/momen-saeb-b88183283/)
 
 ---
 
