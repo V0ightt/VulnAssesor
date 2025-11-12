@@ -1,6 +1,5 @@
 # VulnAssesor
 
-# VulnAssesor
 >[!warning]
 > **Work in Progress:** This project is in the very early stages of development. It is not yet functional and is subject to major changes.
 
@@ -187,11 +186,12 @@ This project is now ready for contributions!
 
 - **Issues:** [GitHub Issues](link-to-issues)
 - **Discussions:** [GitHub Discussions](link-to-discussions)
-- **Discord:** v0ight_
-- **LinkedIn:** [Here](https://www.linkedin.com/in/momen-saeb-b88183283/)
+- **Discord:** [your-email]
+- **LinkedIn:** [your-email]
 
 ---
 
 **Built with ❤️ by Momen Saeb**
 
 *Making web security accessible to everyone.*
+
