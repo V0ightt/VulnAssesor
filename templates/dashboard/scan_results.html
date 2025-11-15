@@ -3,30 +3,39 @@
 {% block title %}Scan Results - {{ scan.website.name }} - VulnAssesor{% endblock %}
 
 {% block content %}
-<div class="results-container">
+<div class="results-container" x-data="resultsPage()">
     <div class="results-header">
         <div>
             <h2>Scan Results</h2>
             <p class="subtitle">Scan #{{ scan.id }} - {{ scan.website.name }}</p>
         </div>
-        <a href="{% url 'dashboard' %}" class="btn btn-secondary">
-            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
-                <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
-            </svg>
-            Back to Dashboard
-        </a>
+        <div class="header-actions">
+            <button @click="exportResults('json')" class="btn btn-secondary" title="Export as JSON">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                </svg>
+                Export
+            </button>
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+                </svg>
+                Back to Dashboard
+            </a>
+        </div>
     </div>
 
     <div class="scan-summary">
         <div class="summary-card">
             <div class="summary-icon">
                 <svg width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z"/>
+                    <path d="M8 16s6-5.686 6-10A6 6 0 0 0 2 6c0 4.314 6 10 6 10zm0-7a3 3 0 1 1 0-6 3 3 0 0 1 0 6z"/>
                 </svg>
             </div>
             <div>
-                <div class="summary-value">{{ scan.website.url }}</div>
-                <div class="summary-label">Target</div>
+                <div class="summary-value" style="font-size: 1rem; word-break: break-word;">{{ scan.website.url }}</div>
+                <div class="summary-label">Target URL</div>
             </div>
         </div>
 
@@ -46,56 +55,133 @@
         <div class="summary-card">
             <div class="summary-icon">
                 <svg width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
-                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                    <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
                 </svg>
             </div>
             <div>
-                <div class="summary-value">{{ scan.created_at|date:"M d, Y H:i" }}</div>
-                <div class="summary-label">Started</div>
+                <div class="summary-value">
+                    {% if scan.completed_at and scan.created_at %}
+                        {{ scan.completed_at|timeuntil:scan.created_at }}
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </div>
+                <div class="summary-label">Duration</div>
             </div>
         </div>
 
         <div class="summary-card">
-            <div class="summary-icon status-completed">
+            <div class="summary-icon status-{{ scan.status|lower }}">
                 <svg width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                     <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
                 </svg>
             </div>
             <div>
-                <div class="summary-value">{{ scan.completed_at|date:"H:i:s" }}</div>
+                <div class="summary-value">{{ scan.completed_at|date:"M d, H:i" }}</div>
                 <div class="summary-label">Completed</div>
             </div>
         </div>
     </div>
 
     {% if results %}
+    <!-- Severity Filter & Search Bar -->
+    <div class="filter-bar">
+        <div class="filter-tabs">
+            <button 
+                @click="severityFilter = 'all'" 
+                :class="{ 'active': severityFilter === 'all' }"
+                class="filter-tab">
+                All ({{ results.count }})
+            </button>
+            {% if results_by_severity.critical.count > 0 %}
+            <button 
+                @click="severityFilter = 'critical'" 
+                :class="{ 'active': severityFilter === 'critical' }"
+                class="filter-tab filter-tab-critical">
+                Critical ({{ results_by_severity.critical.count }})
+            </button>
+            {% endif %}
+            {% if results_by_severity.high.count > 0 %}
+            <button 
+                @click="severityFilter = 'high'" 
+                :class="{ 'active': severityFilter === 'high' }"
+                class="filter-tab filter-tab-high">
+                High ({{ results_by_severity.high.count }})
+            </button>
+            {% endif %}
+            {% if results_by_severity.medium.count > 0 %}
+            <button 
+                @click="severityFilter = 'medium'" 
+                :class="{ 'active': severityFilter === 'medium' }"
+                class="filter-tab filter-tab-medium">
+                Medium ({{ results_by_severity.medium.count }})
+            </button>
+            {% endif %}
+            {% if results_by_severity.low.count > 0 %}
+            <button 
+                @click="severityFilter = 'low'" 
+                :class="{ 'active': severityFilter === 'low' }"
+                class="filter-tab filter-tab-low">
+                Low ({{ results_by_severity.low.count }})
+            </button>
+            {% endif %}
+            {% if results_by_severity.info.count > 0 %}
+            <button 
+                @click="severityFilter = 'info'" 
+                :class="{ 'active': severityFilter === 'info' }"
+                class="filter-tab filter-tab-info">
+                Info ({{ results_by_severity.info.count }})
+            </button>
+            {% endif %}
+        </div>
+        
+        <div class="search-box">
+            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+            </svg>
+            <input 
+                type="text" 
+                x-model="searchQuery" 
+                placeholder="Search vulnerabilities..."
+                class="search-input">
+            <button 
+                x-show="searchQuery.length > 0" 
+                @click="searchQuery = ''" 
+                class="search-clear"
+                type="button">
+                ×
+            </button>
+        </div>
+    </div>
+
+    <!-- Severity Breakdown -->
     <div class="severity-breakdown">
-        {% if results_by_severity.critical %}
+        {% if results_by_severity.critical.count > 0 %}
         <div class="severity-stat critical">
             <span class="count">{{ results_by_severity.critical.count }}</span>
             <span class="label">Critical</span>
         </div>
         {% endif %}
-        {% if results_by_severity.high %}
+        {% if results_by_severity.high.count > 0 %}
         <div class="severity-stat high">
             <span class="count">{{ results_by_severity.high.count }}</span>
             <span class="label">High</span>
         </div>
         {% endif %}
-        {% if results_by_severity.medium %}
+        {% if results_by_severity.medium.count > 0 %}
         <div class="severity-stat medium">
             <span class="count">{{ results_by_severity.medium.count }}</span>
             <span class="label">Medium</span>
         </div>
         {% endif %}
-        {% if results_by_severity.low %}
+        {% if results_by_severity.low.count > 0 %}
         <div class="severity-stat low">
             <span class="count">{{ results_by_severity.low.count }}</span>
             <span class="label">Low</span>
         </div>
         {% endif %}
-        {% if results_by_severity.info %}
+        {% if results_by_severity.info.count > 0 %}
         <div class="severity-stat info">
             <span class="count">{{ results_by_severity.info.count }}</span>
             <span class="label">Info</span>
@@ -103,60 +189,81 @@
         {% endif %}
     </div>
 
-    <div class="results-list" x-data="{ expandedResult: null }">
-        {% for result in results %}
-        <div class="result-card severity-{{ result.severity }}" :class="{ 'expanded': expandedResult === {{ result.id }} }">
-            <div class="result-header" @click="expandedResult = expandedResult === {{ result.id }} ? null : {{ result.id }}">
-                <div class="result-title-section">
-                    <span class="severity-badge severity-{{ result.severity }}">
-                        {{ result.get_severity_display }}
-                    </span>
-                    <h3>{{ result.vulnerability_name }}</h3>
-                </div>
-                <button class="expand-btn" type="button">
-                    <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"
-                         :style="expandedResult === {{ result.id }} ? 'transform: rotate(180deg)' : ''">
-                        <path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
-                    </svg>
-                </button>
-            </div>
-
-            <div class="result-body" x-show="expandedResult === {{ result.id }}" x-collapse>
-                <div class="result-info">
-                    <div class="info-item">
-                        <strong>Template:</strong>
-                        <span>{{ result.template_name }}</span>
+    <!-- Results List -->
+    <div class="results-list">
+        <template x-for="result in filteredResults" :key="result.id">
+            <div class="result-card" :class="'severity-' + result.severity">
+                <div class="result-header" @click="toggleExpand(result.id)">
+                    <div class="result-title-section">
+                        <span class="severity-badge" :class="'severity-' + result.severity" x-text="result.severity_display"></span>
+                        <h3 x-text="result.vulnerability_name"></h3>
                     </div>
-                    <div class="info-item">
-                        <strong>Target URL:</strong>
-                        <a href="{{ result.target_url }}" target="_blank" rel="noopener noreferrer">
-                            {{ result.target_url }}
-                        </a>
-                    </div>
-                    <div class="info-item">
-                        <strong>Detected:</strong>
-                        <span>{{ result.created_at|date:"M d, Y H:i:s" }}</span>
-                    </div>
+                    <button class="expand-btn" type="button">
+                        <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"
+                             :style="expandedResults.has(result.id) ? 'transform: rotate(180deg)' : ''">
+                            <path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+                        </svg>
+                    </button>
                 </div>
 
-                <div class="raw-data">
-                    <div class="raw-data-header">
-                        <strong>Raw Finding Data</strong>
-                        <button type="button"
-                                @click="navigator.clipboard.writeText(JSON.stringify({{ result.raw_finding|safe }}, null, 2))"
-                                class="btn-icon"
-                                title="Copy to clipboard">
-                            <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                                <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-                            </svg>
-                        </button>
+                <div class="result-body" x-show="expandedResults.has(result.id)" 
+                     x-transition:enter="transition ease-out duration-200"
+                     x-transition:enter-start="opacity-0 transform scale-95"
+                     x-transition:enter-end="opacity-100 transform scale-100"
+                     x-transition:leave="transition ease-in duration-150"
+                     x-transition:leave-start="opacity-100 transform scale-100"
+                     x-transition:leave-end="opacity-0 transform scale-95">
+                    
+                    <div class="result-info">
+                        <div class="info-item">
+                            <strong>Template:</strong>
+                            <span x-text="result.template_name"></span>
+                        </div>
+                        <div class="info-item">
+                            <strong>Target URL:</strong>
+                            <a :href="result.target_url" target="_blank" rel="noopener noreferrer" x-text="result.target_url" class="url-link"></a>
+                        </div>
+                        <div class="info-item">
+                            <strong>Detected:</strong>
+                            <span x-text="result.created_at"></span>
+                        </div>
                     </div>
-                    <pre class="json-data">{{ result.raw_finding|safe }}</pre>
+
+                    <div class="raw-data">
+                        <div class="raw-data-header">
+                            <strong>Raw Finding Data (JSON)</strong>
+                            <button type="button"
+                                    @click="copyToClipboard(result.id, result.raw_finding)"
+                                    class="btn-icon"
+                                    :title="copiedId === result.id ? 'Copied!' : 'Copy to clipboard'">
+                                <svg x-show="copiedId !== result.id" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
+                                    <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
+                                </svg>
+                                <svg x-show="copiedId === result.id" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="color: #3fb950;">
+                                    <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <pre class="json-data" x-text="JSON.stringify(result.raw_finding, null, 2)"></pre>
+                    </div>
                 </div>
             </div>
+        </template>
+
+        <!-- No Results State -->
+        <div x-show="filteredResults.length === 0" class="empty-state">
+            <div class="empty-icon">
+                <svg width="80" height="80" fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                </svg>
+            </div>
+            <h3>No Results Found</h3>
+            <p>No vulnerabilities match your current filters or search query.</p>
+            <button @click="severityFilter = 'all'; searchQuery = ''" class="btn" style="margin-top: 1rem;">
+                Clear Filters
+            </button>
         </div>
-        {% endfor %}
     </div>
     {% else %}
     <div class="empty-state">
@@ -171,6 +278,82 @@
     {% endif %}
 </div>
 
+<script>
+function resultsPage() {
+    return {
+        severityFilter: 'all',
+        searchQuery: '',
+        expandedResults: new Set(),
+        copiedId: null,
+        allResults: {{ results_json|safe }},
+        
+        get filteredResults() {
+            let filtered = this.allResults;
+            
+            // Filter by severity
+            if (this.severityFilter !== 'all') {
+                filtered = filtered.filter(r => r.severity === this.severityFilter);
+            }
+            
+            // Filter by search query
+            if (this.searchQuery.trim()) {
+                const query = this.searchQuery.toLowerCase();
+                filtered = filtered.filter(r => 
+                    r.vulnerability_name.toLowerCase().includes(query) ||
+                    r.template_name.toLowerCase().includes(query) ||
+                    r.target_url.toLowerCase().includes(query)
+                );
+            }
+            
+            return filtered;
+        },
+        
+        toggleExpand(id) {
+            if (this.expandedResults.has(id)) {
+                this.expandedResults.delete(id);
+            } else {
+                this.expandedResults.add(id);
+            }
+        },
+        
+        copyToClipboard(id, data) {
+            const text = JSON.stringify(data, null, 2);
+            navigator.clipboard.writeText(text).then(() => {
+                this.copiedId = id;
+                setTimeout(() => {
+                    this.copiedId = null;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        },
+        
+        exportResults(format) {
+            if (format === 'json') {
+                const dataStr = JSON.stringify({
+                    scan_id: {{ scan.id }},
+                    website: '{{ scan.website.name }}',
+                    url: '{{ scan.website.url }}',
+                    scan_date: '{{ scan.created_at|date:"Y-m-d H:i:s" }}',
+                    completed_at: '{{ scan.completed_at|date:"Y-m-d H:i:s" }}',
+                    total_findings: {{ results.count }},
+                    results: this.allResults
+                }, null, 2);
+                
+                const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+                const exportFileDefaultName = 'scan_{{ scan.id }}_results.json';
+                
+                const linkElement = document.createElement('a');
+                linkElement.setAttribute('href', dataUri);
+                linkElement.setAttribute('download', exportFileDefaultName);
+                linkElement.click();
+            }
+        }
+    }
+}
+</script>
+
 <style>
 .results-container {
     max-width: 1200px;
@@ -182,6 +365,14 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.header-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .scan-summary {
@@ -210,6 +401,7 @@
     background: rgba(88, 166, 255, 0.1);
     border-radius: 6px;
     color: #58a6ff;
+    flex-shrink: 0;
 }
 
 .summary-icon.severity-critical {
@@ -222,11 +414,17 @@
     color: #3fb950;
 }
 
+.summary-icon.status-failed {
+    background: rgba(248, 81, 73, 0.1);
+    color: #f85149;
+}
+
 .summary-value {
     font-size: 1.5rem;
     font-weight: 600;
     color: #c9d1d9;
-    word-break: break-all;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .summary-label {
@@ -235,6 +433,124 @@
     margin-top: 0.25rem;
 }
 
+/* Filter Bar */
+.filter-bar {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filter-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    flex: 1;
+}
+
+.filter-tab {
+    padding: 0.5rem 1rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.filter-tab:hover {
+    background: #21262d;
+    color: #c9d1d9;
+}
+
+.filter-tab.active {
+    background: #58a6ff;
+    color: #0d1117;
+    border-color: #58a6ff;
+}
+
+.filter-tab-critical.active {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+    border-color: #f85149;
+}
+
+.filter-tab-high.active {
+    background: rgba(255, 159, 10, 0.2);
+    color: #ff9f0a;
+    border-color: #ff9f0a;
+}
+
+.filter-tab-medium.active {
+    background: rgba(217, 153, 34, 0.2);
+    color: #d29922;
+    border-color: #d29922;
+}
+
+.filter-tab-low.active {
+    background: rgba(88, 166, 255, 0.2);
+    color: #58a6ff;
+    border-color: #58a6ff;
+}
+
+.filter-tab-info.active {
+    background: rgba(139, 148, 158, 0.2);
+    color: #8b949e;
+    border-color: #8b949e;
+}
+
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    min-width: 300px;
+}
+
+.search-box svg {
+    color: #8b949e;
+    flex-shrink: 0;
+}
+
+.search-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #c9d1d9;
+    font-size: 0.875rem;
+}
+
+.search-input::placeholder {
+    color: #8b949e;
+}
+
+.search-clear {
+    background: none;
+    border: none;
+    color: #8b949e;
+    cursor: pointer;
+    font-size: 1.5rem;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s ease;
+}
+
+.search-clear:hover {
+    color: #c9d1d9;
+}
+
+/* Severity Breakdown */
 .severity-breakdown {
     display: flex;
     gap: 1rem;
@@ -243,6 +559,7 @@
     border: 1px solid #30363d;
     border-radius: 6px;
     margin-bottom: 2rem;
+    flex-wrap: wrap;
 }
 
 .severity-stat {
@@ -291,6 +608,7 @@
     margin-top: 0.25rem;
 }
 
+/* Results List */
 .results-list {
     display: flex;
     flex-direction: column;
@@ -343,6 +661,7 @@
     align-items: center;
     gap: 1rem;
     flex: 1;
+    flex-wrap: wrap;
 }
 
 .result-title-section h3 {
@@ -357,6 +676,7 @@
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .severity-badge.severity-critical {
@@ -391,6 +711,7 @@
     cursor: pointer;
     padding: 0.5rem;
     transition: all 0.2s ease;
+    flex-shrink: 0;
 }
 
 .expand-btn:hover {
@@ -415,6 +736,7 @@
 .info-item {
     display: flex;
     gap: 0.5rem;
+    flex-wrap: wrap;
 }
 
 .info-item strong {
@@ -425,6 +747,16 @@
 .info-item span,
 .info-item a {
     color: #c9d1d9;
+    word-break: break-word;
+}
+
+.url-link {
+    color: #58a6ff;
+    text-decoration: none;
+}
+
+.url-link:hover {
+    text-decoration: underline;
 }
 
 .raw-data {
@@ -448,6 +780,22 @@
     font-size: 0.875rem;
 }
 
+.btn-icon {
+    background: none;
+    border: none;
+    color: #8b949e;
+    cursor: pointer;
+    padding: 0.25rem;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-icon:hover {
+    color: #c9d1d9;
+}
+
 .json-data {
     padding: 1rem;
     margin: 0;
@@ -456,6 +804,96 @@
     font-size: 0.875rem;
     line-height: 1.5;
     color: #c9d1d9;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 120px;
+    height: 120px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 50%;
+    margin-bottom: 2rem;
+    color: #8b949e;
+}
+
+.empty-icon.status-completed {
+    color: #3fb950;
+}
+
+.empty-state h3 {
+    color: #c9d1d9;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: #8b949e;
+    margin-bottom: 0;
+}
+
+/* Transitions */
+.transition {
+    transition-property: all;
+}
+
+.duration-200 {
+    transition-duration: 200ms;
+}
+
+.duration-150 {
+    transition-duration: 150ms;
+}
+
+.ease-out {
+    transition-timing-function: cubic-bezier(0, 0, 0.2, 1);
+}
+
+.ease-in {
+    transition-timing-function: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .results-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .header-actions {
+        width: 100%;
+    }
+    
+    .header-actions .btn {
+        flex: 1;
+    }
+    
+    .scan-summary {
+        grid-template-columns: 1fr;
+    }
+    
+    .filter-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .search-box {
+        width: 100%;
+        min-width: auto;
+    }
+    
+    .severity-breakdown {
+        justify-content: center;
+    }
 }
 </style>
 {% endblock %}

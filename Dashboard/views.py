@@ -382,10 +382,36 @@ def scan_results_view(request, scan_pk):
         'info': results.filter(severity='info'),
     }
 
+    # Prepare results as JSON for Alpine.js
+    import json
+    from django.core.serializers.json import DjangoJSONEncoder
+    
+    # Define severity order for sorting
+    severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3, 'info': 4}
+    
+    results_list = []
+    for result in results:
+        results_list.append({
+            'id': result.id,
+            'vulnerability_name': result.vulnerability_name,
+            'template_name': result.template_name,
+            'severity': result.severity,
+            'severity_display': result.get_severity_display(),
+            'target_url': result.target_url,
+            'created_at': result.created_at.strftime('%b %d, %Y %H:%M:%S'),
+            'raw_finding': result.raw_finding,
+        })
+    
+    # Sort by severity (critical first) then by created_at
+    results_list.sort(key=lambda x: (severity_order.get(x['severity'], 99), x['created_at']), reverse=True)
+    
+    results_json = json.dumps(results_list, cls=DjangoJSONEncoder)
+
     return render(request, 'dashboard/scan_results.html', {
         'scan': scan,
         'results': results,
         'results_by_severity': results_by_severity,
+        'results_json': results_json,
     })
 
 
