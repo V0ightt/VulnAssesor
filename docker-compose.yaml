@@ -36,6 +36,7 @@ services:
       - POSTGRES_USER=vulnassesor
       - POSTGRES_PASSWORD=strongpassword
       - POSTGRES_HOST=db
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - db
       - redis
@@ -51,6 +52,7 @@ services:
       - POSTGRES_USER=vulnassesor
       - POSTGRES_PASSWORD=strongpassword
       - POSTGRES_HOST=db
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
       - db
       - redis

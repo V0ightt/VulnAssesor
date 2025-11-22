@@ -101,3 +101,8 @@ class ProjectManager:
             origin.push()
             return True
         return False
+
+    def delete_workspace(self):
+        """Deletes the workspace directory."""
+        if os.path.exists(self.workspace_root):
+            shutil.rmtree(self.workspace_root)

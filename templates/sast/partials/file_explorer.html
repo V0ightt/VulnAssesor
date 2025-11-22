@@ -1,33 +1,40 @@
 <ul class="file-tree" style="list-style: none; padding-left: 10px; margin: 0;">
     {% for item in items %}
-    <li style="margin: 2px 0;">
+    <li style="margin: 1px 0;">
         {% if item.is_dir %}
         <div x-data="{ open: false }">
-            <div @click="open = !open" class="tree-item dir" style="cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 4px; color: #c9d1d9;">
-                <span x-show="!open" style="margin-right: 5px; font-size: 0.8em;">▶</span>
-                <span x-show="open" style="margin-right: 5px; font-size: 0.8em;">▼</span>
-                <svg width="16" height="16" fill="#8b949e" viewBox="0 0 16 16" style="margin-right: 5px;">
+            <div @click="open = !open" class="tree-item dir hover-bg" style="cursor: pointer; display: flex; align-items: center; padding: 4px 8px; border-radius: 4px; color: #c9d1d9; transition: background-color 0.2s;">
+                <span x-show="!open" style="margin-right: 8px; font-size: 0.7em; color: #8b949e;">▶</span>
+                <span x-show="open" style="margin-right: 8px; font-size: 0.7em; color: #8b949e;">▼</span>
+                <svg width="16" height="16" fill="#58a6ff" viewBox="0 0 16 16" style="margin-right: 8px;">
                     <path d="M9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31L.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3zm-8.322.12C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139z"/>
                 </svg>
-                {{ item.name }}
+                <span style="font-size: 0.95em;">{{ item.name }}</span>
             </div>
-            <div x-show="open" class="tree-children" style="padding-left: 15px;" 
+            <div x-show="open" class="tree-children" style="padding-left: 12px; border-left: 1px solid #30363d; margin-left: 11px;" 
                  hx-get="{% url 'file_explorer' project.id %}?path={{ item.path }}" 
                  hx-trigger="reveal once">
                 <!-- Lazy load children -->
+                <div style="padding: 5px; color: #8b949e; font-size: 0.8em;">Loading...</div>
             </div>
         </div>
         {% else %}
-        <div class="tree-item file" 
+        <div class="tree-item file hover-bg" 
              hx-get="{% url 'file_viewer' project.id %}?path={{ item.path }}" 
              hx-target="#file-viewer-container"
-             style="cursor: pointer; display: flex; align-items: center; padding: 4px; border-radius: 4px; color: #c9d1d9;">
-            <svg width="16" height="16" fill="#8b949e" viewBox="0 0 16 16" style="margin-right: 5px;">
+             style="cursor: pointer; display: flex; align-items: center; padding: 4px 8px; border-radius: 4px; color: #c9d1d9; transition: background-color 0.2s;">
+            <svg width="16" height="16" fill="#8b949e" viewBox="0 0 16 16" style="margin-right: 8px; margin-left: 18px;">
                 <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
             </svg>
-            {{ item.name }}
+            <span style="font-size: 0.95em;">{{ item.name }}</span>
         </div>
         {% endif %}
     </li>
     {% endfor %}
 </ul>
+
+<style>
+    .hover-bg:hover {
+        background-color: #21262d;
+    }
+</style>

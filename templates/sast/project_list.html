@@ -17,8 +17,17 @@
     <div class="grid-layout" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px;">
         {% for project in projects %}
         <div class="card" style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px;">
-            <div class="card-header" style="margin-bottom: 10px;">
+            <div class="card-header" style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-start;">
                 <h3 style="margin: 0;"><a href="{% url 'project_detail' project.id %}" style="color: #58a6ff; text-decoration: none;">{{ project.name }}</a></h3>
+                <form method="post" action="{% url 'project_delete' project.id %}" onsubmit="return confirm('Are you sure you want to delete this project? This action cannot be undone.');">
+                    {% csrf_token %}
+                    <button type="submit" style="background: none; border: none; color: #8b949e; cursor: pointer; padding: 4px;" title="Delete Project">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                        </svg>
+                    </button>
+                </form>
             </div>
             <div class="card-body">
                 {% if project.repository_url %}

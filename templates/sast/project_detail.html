@@ -1,41 +1,67 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ project.name }} - VulnAssesor{% endblock %}
+{% block title %}{{ project.name }} - Dashboard{% endblock %}
 
 {% block content %}
-<div class="project-workspace" style="display: flex; height: calc(100vh - 60px); margin: -20px;">
-    <!-- File Explorer Sidebar -->
-    <div class="file-explorer" style="width: 300px; border-right: 1px solid #30363d; overflow-y: auto; background-color: #0d1117; display: flex; flex-direction: column;">
-        <div class="explorer-header" style="padding: 10px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center;">
-            <h4 style="margin: 0; font-size: 0.9em; text-transform: uppercase; color: #8b949e;">Explorer</h4>
-            <a href="{% url 'project_list' %}" style="color: #8b949e; text-decoration: none;">&larr;</a>
-        </div>
-        <div class="explorer-content" 
-             hx-get="{% url 'file_explorer' project.id %}" 
-             hx-trigger="load{% if project.status != 'READY' %}, every 2s{% endif %}" 
-             style="flex: 1;">
-            <!-- Content loaded via HTMX -->
-            <div style="padding: 10px; color: #8b949e;">
-                {% if project.status == 'READY' %}
-                Loading...
-                {% elif project.status == 'FAILED' %}
-                Ingestion Failed.
-                {% else %}
-                Ingesting Project... <span class="htmx-indicator">Please wait</span>
-                {% endif %}
+<div class="dashboard-container" style="padding: 30px; max-width: 1400px; margin: 0 auto;">
+    
+    <!-- Header Section -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <h1 style="margin: 0; font-size: 2em; color: #c9d1d9;">{{ project.name }}</h1>
+                <form method="post" action="{% url 'project_delete' project.id %}" onsubmit="return confirm('Are you sure you want to delete this project? This action cannot be undone.');" style="margin: 0;">
+                    {% csrf_token %}
+                    <button type="submit" style="background: none; border: none; color: #8b949e; cursor: pointer; padding: 5px; display: flex; align-items: center;" title="Delete Project">
+                        <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                        </svg>
+                    </button>
+                </form>
             </div>
+            <p style="margin: 5px 0 0 0; color: #8b949e;">SAST Dashboard</p>
+        </div>
+        
+        <div id="scan-controls" style="display: flex; gap: 10px;">
+            {% if latest_scan and latest_scan.status == 'PENDING' or latest_scan.status == 'SCANNING' or latest_scan.status == 'CLONING' %}
+                <form method="post" action="{% url 'sast_cancel_scan' latest_scan.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger" style="background-color: #da3633; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        Stop Scan
+                    </button>
+                </form>
+            {% else %}
+                <form method="post" action="{% url 'start_scan' project.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-primary" style="background-color: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        Run New Scan
+                    </button>
+                </form>
+            {% endif %}
         </div>
     </div>
 
-    <!-- Main Content Area (Code Viewer / Dashboard) -->
-    <div class="main-content" style="flex: 1; overflow-y: auto; padding: 0; background-color: #0d1117;">
-        <div id="file-viewer-container" style="height: 100%;">
-            <div style="padding: 20px; text-align: center; color: #8b949e; margin-top: 100px;">
-                <h3>Select a file to view</h3>
-                <p>Or start a scan to see vulnerabilities.</p>
-                <button class="btn btn-primary" style="background-color: #238636; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">Start Scan</button>
-            </div>
+    <!-- Main Content -->
+    {% if latest_scan %}
+        {% include 'sast/partials/scan_status.html' with scan=latest_scan %}
+    {% else %}
+        <!-- Empty State -->
+        <div style="text-align: center; padding: 60px; background-color: #161b22; border: 1px solid #30363d; border-radius: 6px;">
+            <svg width="64" height="64" fill="#30363d" viewBox="0 0 16 16" style="margin-bottom: 20px;">
+                <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+            </svg>
+            <h2 style="color: #c9d1d9; margin-bottom: 10px;">No Scans Yet</h2>
+            <p style="color: #8b949e; margin-bottom: 20px;">Start a scan to analyze your code for vulnerabilities.</p>
+            <form method="post" action="{% url 'start_scan' project.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary" style="background-color: #238636; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    Start First Scan
+                </button>
+            </form>
         </div>
-    </div>
+    {% endif %}
+
 </div>
 {% endblock %}

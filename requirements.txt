@@ -7,3 +7,5 @@ gunicorn
 PyYAML
 GitPython
 Pygments
+openai
+pydantic

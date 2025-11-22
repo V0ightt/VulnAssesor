@@ -29,6 +29,7 @@ class SASTScanJob(models.Model):
         ('SCANNING', 'Scanning'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
     ]
     
     SCAN_TYPE_CHOICES = [

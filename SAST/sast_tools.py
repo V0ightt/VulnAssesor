@@ -58,3 +58,30 @@ def push_fixes(project, commit_message="Applied SAST fixes"):
     """Pushes changes to the remote repository."""
     manager = ProjectManager(project)
     return manager.push_changes(commit_message)
+
+def list_project_files(project):
+    """Returns a list of all scannable files in the project."""
+    manager = ProjectManager(project)
+    files = []
+    
+    # Extensions to scan
+    ALLOWED_EXTENSIONS = {'.py', '.js', '.ts', '.html', '.css', '.java', '.c', '.cpp', '.go', '.rs', '.php'}
+    
+    for root, dirs, filenames in os.walk(manager.workspace_root):
+        # Skip hidden directories (like .git)
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        
+        for filename in filenames:
+            _, ext = os.path.splitext(filename)
+            if ext.lower() in ALLOWED_EXTENSIONS:
+                # Get relative path
+                full_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(full_path, manager.workspace_root)
+                files.append(rel_path.replace('\\', '/'))
+                
+    return files
+
+def read_file(project, file_path):
+    """Reads a file from the project workspace."""
+    manager = ProjectManager(project)
+    return manager.get_file_content(file_path)

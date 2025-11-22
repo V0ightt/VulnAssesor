@@ -78,12 +78,36 @@
                     <span x-show="sidebarOpen" class="sidebar-text">Configuration</span>
                 </a>
 
-                <a href="{% url 'project_list' %}" class="sidebar-link {% if 'projects' in request.path %}active{% endif %}">
-                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
-                        <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
-                    </svg>
-                    <span x-show="sidebarOpen" class="sidebar-text">Projects</span>
-                </a>
+                <!-- Projects Dropdown -->
+                <div x-data="{ expanded: {% if 'projects' in request.path %}true{% else %}false{% endif %} }">
+                    <a href="#" @click.prevent="expanded = !expanded" class="sidebar-link" :class="{ 'active': 'projects' in request.path }">
+                        <div style="display: flex; align-items: center; flex: 1;">
+                            <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
+                                <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
+                            </svg>
+                            <span x-show="sidebarOpen" class="sidebar-text">Projects</span>
+                        </div>
+                        <svg x-show="sidebarOpen" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" :style="expanded ? 'transform: rotate(180deg)' : ''" style="transition: transform 0.2s;">
+                            <path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+                        </svg>
+                    </a>
+
+                    <!-- Project List in Sidebar -->
+                    <div x-show="sidebarOpen && expanded" x-collapse class="sidebar-projects" style="background-color: transparent; border-left: 2px solid #30363d; margin-left: 20px;">
+                        <a href="{% url 'project_list' %}" class="sidebar-link" style="padding-left: 20px; font-size: 0.9em; color: #8b949e;">
+                            <span class="sidebar-text">All Projects</span>
+                        </a>
+                        {% for p in sidebar_projects %}
+                        <a href="{% url 'project_detail' p.id %}" class="sidebar-link {% if project and project.id == p.id %}active{% endif %}" style="padding-left: 20px; font-size: 0.9em;">
+                            <span class="sidebar-text">{{ p.name }}</span>
+                        </a>
+                        {% endfor %}
+                        <a href="{% url 'project_create' %}" class="sidebar-link" style="padding-left: 20px; font-size: 0.9em; color: #58a6ff;">
+                            <span class="sidebar-text">+ New Project</span>
+                        </a>
+                    </div>
+                </div>
+
             </nav>
 
             <!-- Spacer -->

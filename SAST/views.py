@@ -1,9 +1,10 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
+from django.views.decorators.cache import never_cache
 from django.http import HttpResponse, JsonResponse
 from .models import Project, SASTScanJob, SASTFinding
 from .services import ProjectManager
-from .tasks import ingest_project_task
+from .tasks import ingest_project_task, run_sast_scan
 from pygments import highlight
 from pygments.lexers import get_lexer_for_filename, TextLexer
 from pygments.formatters import HtmlFormatter
@@ -38,7 +39,20 @@ def project_create(request):
 @login_required
 def project_detail(request, project_id):
     project = get_object_or_404(Project, id=project_id, owner=request.user)
-    return render(request, 'sast/project_detail.html', {'project': project})
+    latest_scan = project.scans.order_by('-created_at').first()
+    scan_history = project.scans.order_by('-created_at')[:10] # Get last 10 scans
+    
+    return render(request, 'sast/project_detail.html', {
+        'project': project, 
+        'latest_scan': latest_scan,
+        'scan_history': scan_history
+    })
+
+@login_required
+@never_cache
+def scan_status(request, scan_id):
+    scan = get_object_or_404(SASTScanJob, id=scan_id, project__owner=request.user)
+    return render(request, 'sast/partials/scan_status.html', {'scan': scan})
 
 @login_required
 def file_explorer(request, project_id):
@@ -79,3 +93,48 @@ def file_viewer(request, project_id):
         'code': highlighted_code,
         'css': css
     })
+
+@login_required
+def start_scan(request, project_id):
+    if request.method == 'POST':
+        project = get_object_or_404(Project, id=project_id, owner=request.user)
+        
+        # Cancel any existing running scans for this project
+        active_scans = SASTScanJob.objects.filter(
+            project=project, 
+            status__in=['PENDING', 'SCANNING', 'CLONING']
+        )
+        for scan in active_scans:
+            scan.status = 'CANCELLED'
+            scan.save()
+        
+        # Create Scan Job
+        scan_job = SASTScanJob.objects.create(project=project, status='PENDING')
+        
+        # Trigger Task
+        run_sast_scan.delay(scan_job.id)
+        
+        return redirect('project_detail', project_id=project.id)
+    return redirect('project_detail', project_id=project_id)
+
+@login_required
+def cancel_scan(request, scan_id):
+    if request.method == 'POST':
+        scan = get_object_or_404(SASTScanJob, id=scan_id, project__owner=request.user)
+        if scan.status in ['PENDING', 'SCANNING', 'CLONING']:
+            scan.status = 'CANCELLED'
+            scan.save()
+    return redirect('project_detail', project_id=scan.project.id)
+
+@login_required
+def project_delete(request, project_id):
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    if request.method == 'POST':
+        # Delete workspace files
+        manager = ProjectManager(project)
+        manager.delete_workspace()
+        
+        # Delete project (cascades to scans and findings)
+        project.delete()
+        return redirect('project_list')
+    return redirect('project_list')
