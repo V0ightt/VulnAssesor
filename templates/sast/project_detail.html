@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ project.name }} - VulnAssesor{% endblock %}
+
+{% block content %}
+<div class="project-workspace" style="display: flex; height: calc(100vh - 60px); margin: -20px;">
+    <!-- File Explorer Sidebar -->
+    <div class="file-explorer" style="width: 300px; border-right: 1px solid #30363d; overflow-y: auto; background-color: #0d1117; display: flex; flex-direction: column;">
+        <div class="explorer-header" style="padding: 10px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center;">
+            <h4 style="margin: 0; font-size: 0.9em; text-transform: uppercase; color: #8b949e;">Explorer</h4>
+            <a href="{% url 'project_list' %}" style="color: #8b949e; text-decoration: none;">&larr;</a>
+        </div>
+        <div class="explorer-content" 
+             hx-get="{% url 'file_explorer' project.id %}" 
+             hx-trigger="load{% if project.status != 'READY' %}, every 2s{% endif %}" 
+             style="flex: 1;">
+            <!-- Content loaded via HTMX -->
+            <div style="padding: 10px; color: #8b949e;">
+                {% if project.status == 'READY' %}
+                Loading...
+                {% elif project.status == 'FAILED' %}
+                Ingestion Failed.
+                {% else %}
+                Ingesting Project... <span class="htmx-indicator">Please wait</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Area (Code Viewer / Dashboard) -->
+    <div class="main-content" style="flex: 1; overflow-y: auto; padding: 0; background-color: #0d1117;">
+        <div id="file-viewer-container" style="height: 100%;">
+            <div style="padding: 20px; text-align: center; color: #8b949e; margin-top: 100px;">
+                <h3>Select a file to view</h3>
+                <p>Or start a scan to see vulnerabilities.</p>
+                <button class="btn btn-primary" style="background-color: #238636; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">Start Scan</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

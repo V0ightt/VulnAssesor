@@ -1,0 +1,14 @@
+<div class="code-viewer">
+    <div class="viewer-header" style="padding: 10px; border-bottom: 1px solid #30363d; background-color: #161b22; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-family: monospace; color: #c9d1d9;">{{ path }}</span>
+    </div>
+    <div class="viewer-content" style="padding: 0;">
+        <style>
+            {{ css|safe }}
+            .source { background-color: #0d1117; color: #c9d1d9; padding: 10px; overflow-x: auto; }
+            .source pre { margin: 0; font-family: 'Courier New', Courier, monospace; }
+            .linenos { color: #6e7681; border-right: 1px solid #30363d; padding-right: 10px; margin-right: 10px; user-select: none; }
+        </style>
+        {{ code|safe }}
+    </div>
+</div>

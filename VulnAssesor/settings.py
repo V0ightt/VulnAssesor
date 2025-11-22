@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'Dashboard',
+    'SAST',
 ]
 
 MIDDLEWARE = [
@@ -75,16 +76,24 @@ WSGI_APPLICATION = 'VulnAssesor.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.environ.get('POSTGRES_NAME', 'vulnassesor_db'),
-        'USER': os.environ.get('POSTGRES_USER', 'vulnassesor'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'strongpassword'),
-        'HOST': os.environ.get('POSTGRES_HOST', 'db'),
-        'PORT': '5432',
+if os.environ.get('USE_SQLITE', 'False') == 'True':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_NAME', 'vulnassesor_db'),
+            'USER': os.environ.get('POSTGRES_USER', 'vulnassesor'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'strongpassword'),
+            'HOST': os.environ.get('POSTGRES_HOST', 'db'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        }
+    }
 
 
 # Password validation
@@ -136,6 +145,10 @@ LOGOUT_REDIRECT_URL = 'login'
 # Static Files
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Media Files
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Celery Configuration
 # This points to the 'redis' service in docker-compose.yml

@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block title %}New Project - VulnAssesor{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 600px; margin: 0 auto;">
+    <h1>New Project</h1>
+    <div class="card" style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 20px;">
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label for="name" style="display: block; margin-bottom: 5px;">Project Name</label>
+                    <input type="text" id="name" name="name" class="form-control" required style="width: 100%; padding: 8px; background-color: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label for="repository_url" style="display: block; margin-bottom: 5px;">Git Repository URL</label>
+                    <input type="url" id="repository_url" name="repository_url" class="form-control" placeholder="https://github.com/user/repo.git" style="width: 100%; padding: 8px; background-color: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 5px;">OR Upload Zip</label>
+                    <input type="file" name="source_zip" class="form-control" accept=".zip" style="width: 100%; padding: 8px; background-color: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 4px;">
+                </div>
+                
+                <div class="form-actions" style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn btn-primary" style="background-color: #238636; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Create Project</button>
+                    <a href="{% url 'project_list' %}" class="btn btn-secondary" style="background-color: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 16px; border-radius: 4px; text-decoration: none;">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
