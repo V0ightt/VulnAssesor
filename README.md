@@ -3,9 +3,9 @@
 > **Work in Progress:** This project is in the very early stages of development. It is not yet functional and is subject to major changes.
 
 
-## 🎯 Overview & Goal
+## 🎯 Overview
 
-**VulnAssesor** is an open-source, all-in-one web security and monitoring hub built with Django and HTMX. Sign in, add your website, and get comprehensive security analysis with real-time scanning powered by Nuclei and AI Agents.
+**VulnAssesor** is an open-source, all-in-one web security and monitoring hub built with Django and HTMX. Sign in, add your website, and get comprehensive security analysis with real-time scanning powered by Nuclei and AI.
 
 ### Current Features (Phase 3 - Implemented)
 
@@ -29,6 +29,7 @@
 
 ### Prerequisites
 - Docker & Docker Compose
+- Or: Python 3.14, PostgreSQL, Redis
 
 ### Setup (5/10 minutes)
 
@@ -74,7 +75,7 @@ Adjust Nuclei settings without touching code:
 
 ### 4. Modern UI
 GitHub-inspired dark theme with:
-- HTMX for real-time updates 
+- HTMX for real-time updates (no page reloads)
 - Alpine.js for smooth interactions
 - Responsive mobile-friendly design
 - Intuitive navigation
@@ -115,12 +116,13 @@ docker-compose up
 
 - **User Isolation:** Each user's data is completely isolated
 - **CSRF Protection:** All forms protected
+- **Staff-Only Config:** Scanner configuration restricted to staff users
 - **Input Validation:** All user inputs validated
 - **Secure Storage:** Credentials never stored in plain text
 
 ## 🧪 Testing
 
-If you want to help the project and find bugs/errors check the testing checklist:
+Comprehensive testing checklist included:
 - Template CRUD operations
 - Scan execution and status updates
 - Real-time HTMX polling
@@ -155,7 +157,7 @@ This project is now ready for contributions!
 - Real-time scanning
 - Configuration system
 
-### 🚀 Phase 4: AI & SAST Integration (Next)
+### 🚀 Phase 4: AI Integration (Next)
 - AI-powered vulnerability analysis
 - Plain-English explanations
 - Code-level fix suggestions
@@ -168,7 +170,6 @@ This project is now ready for contributions!
 - PDF report generation
 - Compliance reports
 
-# Phase 6+ 
 ## 📄 License
 
 [Choose appropriate license - e.g., MIT, GPL, etc.]
@@ -182,9 +183,10 @@ This project is now ready for contributions!
 
 ## 📧 Contact
 
-- **Issues:** [GitHub Issues](https://github.com/V0ightt/VulnAssesor/issues)
-- **Discord:** v0ight_
-- **LinkedIn:** [Momen Saeb](https://www.linkedin.com/in/momen-saeb-b88183283/)
+- **Issues:** [GitHub Issues](link-to-issues)
+- **Discussions:** [GitHub Discussions](link-to-discussions)
+- **Discord:** [your-email]
+- **LinkedIn:** [your-email]
 
 ---
 
