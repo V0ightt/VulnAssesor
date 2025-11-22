@@ -70,7 +70,7 @@
         <span class="date-text">{{ scan.created_at|date:"M d, Y H:i" }}</span>
     </td>
     <td>
-        {% if scan.status == 'COMPLETED' %}
+        {% if scan.status == 'COMPLETED' or scan.status == 'CANCELLED' %}
         <span class="results-count">
             {{ scan.results.count }} finding{{ scan.results.count|pluralize }}
         </span>
@@ -79,7 +79,7 @@
         {% endif %}
     </td>
     <td>
-        {% if scan.status == 'COMPLETED' %}
+        {% if scan.status == 'COMPLETED' or scan.status == 'CANCELLED' %}
         <a href="{% url 'scan_results' scan.id %}" class="btn btn-sm">
             View Results
         </a>
@@ -89,8 +89,6 @@
             onclick="showErrorModal({{ scan.id }}, '{{ scan.error_message|escapejs }}')">
             Error Details
         </button>
-        {% elif scan.status == 'CANCELLED' %}
-        <span class="text-muted">Cancelled{% if scan.cancelled_by %} by {{ scan.cancelled_by.username }}{% endif %}</span>
         {% elif scan.status == 'PENDING' or scan.status == 'RUNNING' %}
         <button
             class="btn btn-sm btn-danger"

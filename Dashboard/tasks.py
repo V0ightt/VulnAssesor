@@ -92,60 +92,20 @@ def run_specialist_scan(self, job_id, template_ids):
 
         # Initialize result variable
         result = None
-
-        if use_default_templates:
-            print(f"[Specialist] Using Nuclei default templates")
-
-            # Build the Nuclei command without custom templates
-            command = config.build_command(job.website.url, None)
-
-            # Execute Nuclei with cancellation support
-            print(f"[Specialist] Executing command: {' '.join(command)}")
-            process = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            # Poll process and check for cancellation
-            stdout_lines = []
-            stderr_lines = []
-
-            try:
-                # Wait with timeout and periodic cancellation checks
-                start_time = time.time()
-                while process.poll() is None:
-                    # Check for cancellation every 2 seconds
-                    if time.time() - start_time > config.timeout:
-                        process.kill()
-                        raise subprocess.TimeoutExpired(command, config.timeout)
-
-                    # Refresh job status from DB
-                    job.refresh_from_db()
-                    if job.status == 'CANCELLED':
-                        print(f"[Specialist] Job {job_id} was cancelled during execution")
-                        process.kill()
-                        process.wait(timeout=5)
-                        return {'status': 'cancelled', 'message': 'Scan was cancelled by user'}
-
-                    time.sleep(2)
-
-                # Get output
-                stdout, stderr = process.communicate(timeout=5)
-                result = type('Result', (), {
-                    'returncode': process.returncode,
-                    'stdout': stdout,
-                    'stderr': stderr
-                })()
-
-            except subprocess.TimeoutExpired:
-                process.kill()
-                raise
-        else:
-            # Create a temporary directory to store custom templates
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_path = Path(temp_dir)
+        is_cancelled = False
+        
+        # Prepare command and temp directory if needed
+        command = []
+        temp_dir_obj = None
+        
+        try:
+            if use_default_templates:
+                print(f"[Specialist] Using Nuclei default templates")
+                command = config.build_command(job.website.url, None)
+            else:
+                # Create a temporary directory to store custom templates
+                temp_dir_obj = tempfile.TemporaryDirectory()
+                temp_path = Path(temp_dir_obj.name)
 
                 # Fetch the NucleiTemplate objects and write them to files
                 templates = NucleiTemplate.objects.filter(id__in=template_ids)
@@ -153,73 +113,91 @@ def run_specialist_scan(self, job_id, template_ids):
                 if not templates.exists():
                     raise ValueError("No valid templates found")
 
-                print(f"[Specialist] Writing {templates.count()} templates to {temp_dir}")
+                print(f"[Specialist] Writing {templates.count()} templates to {temp_dir_obj.name}")
 
                 for template in templates:
                     # Create a safe filename from the template name
-                    # Remove any special characters that might cause issues
                     safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in template.name)
                     filename = f"{template.id}_{safe_name}.yaml"
                     template_file = temp_path / filename
 
                     # Write the template content to the file with explicit encoding
                     template_file.write_text(template.template_content, encoding='utf-8')
-                    print(f"[Specialist] Created template file: {filename}")
-                    print(f"[Specialist] Template file path: {template_file}")
-                    print(f"[Specialist] Template file exists: {template_file.exists()}")
-                    print(f"[Specialist] Template file size: {template_file.stat().st_size} bytes")
-
-                # List all files in temp directory for debugging
-                files_in_temp = list(temp_path.glob('*.yaml'))
-                print(f"[Specialist] Total YAML files in temp dir: {len(files_in_temp)}")
-                for f in files_in_temp:
-                    print(f"[Specialist]   - {f.name}")
 
                 # Build the Nuclei command using configuration
                 command = config.build_command(job.website.url, str(temp_path))
-
-                print(f"[Specialist] Executing command: {' '.join(command)}")
                 print(f"[Specialist] Template directory: {temp_path}")
-                print(f"[Specialist] Template directory exists: {temp_path.exists()}")
 
-                # Execute Nuclei with cancellation support
-                process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
+            # Execute Nuclei with cancellation support
+            print(f"[Specialist] Executing command: {' '.join(command)}")
+            
+            # Use mkstemp to create real files on disk for output capture
+            # This avoids Windows-specific locking issues with TemporaryFile
+            import os
+            fd_out, stdout_path = tempfile.mkstemp()
+            fd_err, stderr_path = tempfile.mkstemp()
+            os.close(fd_out)
+            os.close(fd_err)
+            
+            try:
+                with open(stdout_path, 'w', encoding='utf-8') as f_out, \
+                     open(stderr_path, 'w', encoding='utf-8') as f_err:
+                    
+                    process = subprocess.Popen(
+                        command,
+                        stdout=f_out,
+                        stderr=f_err,
+                        text=True,
+                        encoding='utf-8'
+                    )
 
-                # Poll process and check for cancellation
-                try:
-                    start_time = time.time()
-                    while process.poll() is None:
-                        # Check for timeout
-                        if time.time() - start_time > config.timeout:
-                            process.kill()
-                            raise subprocess.TimeoutExpired(command, config.timeout)
+                    try:
+                        # Wait with timeout and periodic cancellation checks
+                        start_time = time.time()
+                        while process.poll() is None:
+                            # Check for timeout
+                            if time.time() - start_time > config.timeout:
+                                process.kill()
+                                raise subprocess.TimeoutExpired(command, config.timeout)
 
-                        # Refresh job status from DB and check for cancellation
-                        job.refresh_from_db()
-                        if job.status == 'CANCELLED':
-                            print(f"[Specialist] Job {job_id} was cancelled during execution")
-                            process.kill()
-                            process.wait(timeout=5)
-                            return {'status': 'cancelled', 'message': 'Scan was cancelled by user'}
+                            # Refresh job status from DB
+                            job.refresh_from_db()
+                            if job.status == 'CANCELLED':
+                                print(f"[Specialist] Job {job_id} was cancelled during execution")
+                                process.kill()
+                                process.wait(timeout=5)
+                                is_cancelled = True
+                                break
 
-                        time.sleep(2)
+                            time.sleep(2)
+                            
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        raise
 
-                    # Get output
-                    stdout, stderr = process.communicate(timeout=5)
-                    result = type('Result', (), {
-                        'returncode': process.returncode,
-                        'stdout': stdout,
-                        'stderr': stderr
-                    })()
+                # Process finished, read outputs from disk
+                with open(stdout_path, 'r', encoding='utf-8') as f:
+                    stdout = f.read()
+                with open(stderr_path, 'r', encoding='utf-8') as f:
+                    stderr = f.read()
+                
+                result = type('Result', (), {
+                    'returncode': process.returncode if not is_cancelled else -1,
+                    'stdout': stdout,
+                    'stderr': stderr
+                })()
+                
+            finally:
+                # Clean up output temp files
+                if os.path.exists(stdout_path):
+                    os.unlink(stdout_path)
+                if os.path.exists(stderr_path):
+                    os.unlink(stderr_path)
 
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    raise
+        finally:
+            # Clean up template temp directory if it exists
+            if temp_dir_obj:
+                temp_dir_obj.cleanup()
 
         print(f"[Specialist] Nuclei execution completed with return code: {result.returncode}")
 
@@ -281,19 +259,21 @@ def run_specialist_scan(self, job_id, template_ids):
         if result.stderr:
             print(f"[Specialist] Nuclei stderr: {result.stderr}")
 
-        # Update job status to COMPLETED
-        job.status = 'COMPLETED'
+        # Update job status to COMPLETED if not cancelled
+        if not is_cancelled:
+            job.status = 'COMPLETED'
+        
         job.completed_at = timezone.now()
         job.save()
 
         summary = {
             'job_id': job_id,
-            'status': 'success',
+            'status': 'cancelled' if is_cancelled else 'success',
             'findings_count': findings_count,
             'target': job.website.url,
         }
 
-        print(f"[Specialist] Scan completed successfully. Found {findings_count} vulnerabilities.")
+        print(f"[Specialist] Scan completed. Status: {summary['status']}. Found {findings_count} vulnerabilities.")
         return summary
 
     except ScanJob.DoesNotExist:

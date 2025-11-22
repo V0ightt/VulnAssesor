@@ -51,7 +51,7 @@
                 <div class="form-group">
                     <label for="timeout">Timeout (seconds)</label>
                     <input type="number" id="timeout" name="timeout"
-                           value="{{ config.timeout }}"
+                           value="{{ config.timeout|default:600 }}"
                            min="60" max="3600"
                            class="form-input"
                            x-model.number="timeout"
@@ -62,7 +62,7 @@
                 <div class="form-group">
                     <label for="rate_limit">Rate Limit (req/sec)</label>
                     <input type="number" id="rate_limit" name="rate_limit"
-                           value="{{ config.rate_limit }}"
+                           value="{{ config.rate_limit|default:150 }}"
                            min="1" max="1000"
                            class="form-input"
                            x-model.number="rateLimit"
@@ -73,7 +73,7 @@
                 <div class="form-group">
                     <label for="concurrency">Concurrency</label>
                     <input type="number" id="concurrency" name="concurrency"
-                           value="{{ config.concurrency }}"
+                           value="{{ config.concurrency|default:25 }}"
                            min="1" max="100"
                            class="form-input"
                            x-model.number="concurrency"
@@ -127,7 +127,7 @@
                 <div class="form-group">
                     <label for="retries">Retries</label>
                     <input type="number" id="retries" name="retries"
-                           value="{{ config.retries }}"
+                           value="{{ config.retries|default:1 }}"
                            min="0" max="10"
                            class="form-input"
                            x-model.number="retries"
@@ -138,7 +138,7 @@
                 <div class="form-group">
                     <label for="max_host_errors">Max Host Errors</label>
                     <input type="number" id="max_host_errors" name="max_host_errors"
-                           value="{{ config.max_host_errors }}"
+                           value="{{ config.max_host_errors|default:30 }}"
                            min="1" max="100"
                            class="form-input"
                            x-model.number="maxHostErrors"

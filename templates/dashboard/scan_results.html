@@ -221,7 +221,7 @@
                         </div>
                         <div class="info-item">
                             <strong>Target URL:</strong>
-                            <a :href="result.target_url" target="_blank" rel="noopener noreferrer" x-text="result.target_url" class="url-link"></a>
+                            <a :href="getSafeUrl(result.target_url)" target="_blank" rel="noopener noreferrer" x-text="result.target_url" class="url-link"></a>
                         </div>
                         <div class="info-item">
                             <strong>Detected:</strong>
@@ -278,6 +278,8 @@
     {% endif %}
 </div>
 
+{{ results_list|json_script:"scan-results-data" }}
+
 <script>
 function resultsPage() {
     return {
@@ -285,7 +287,7 @@ function resultsPage() {
         searchQuery: '',
         expandedResults: new Set(),
         copiedId: null,
-        allResults: {{ results_json|safe }},
+        allResults: JSON.parse(document.getElementById('scan-results-data').textContent),
         
         get filteredResults() {
             let filtered = this.allResults;
@@ -306,6 +308,13 @@ function resultsPage() {
             }
             
             return filtered;
+        },
+        
+        getSafeUrl(url) {
+            if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                return url;
+            }
+            return '#';
         },
         
         toggleExpand(id) {
@@ -333,8 +342,8 @@ function resultsPage() {
             if (format === 'json') {
                 const dataStr = JSON.stringify({
                     scan_id: {{ scan.id }},
-                    website: '{{ scan.website.name }}',
-                    url: '{{ scan.website.url }}',
+                    website: '{{ scan.website.name|escapejs }}',
+                    url: '{{ scan.website.url|escapejs }}',
                     scan_date: '{{ scan.created_at|date:"Y-m-d H:i:s" }}',
                     completed_at: '{{ scan.completed_at|date:"Y-m-d H:i:s" }}',
                     total_findings: {{ results.count }},

@@ -405,13 +405,11 @@ def scan_results_view(request, scan_pk):
     # Sort by severity (critical first) then by created_at
     results_list.sort(key=lambda x: (severity_order.get(x['severity'], 99), x['created_at']), reverse=True)
     
-    results_json = json.dumps(results_list, cls=DjangoJSONEncoder)
-
     return render(request, 'dashboard/scan_results.html', {
         'scan': scan,
         'results': results,
         'results_by_severity': results_by_severity,
-        'results_json': results_json,
+        'results_list': results_list,
     })
 
 
@@ -431,11 +429,18 @@ def nuclei_config_view(request):
     if request.method == 'POST':
         # Update configuration
         try:
-            config.timeout = int(request.POST.get('timeout', config.timeout))
-            config.rate_limit = int(request.POST.get('rate_limit', config.rate_limit))
-            config.concurrency = int(request.POST.get('concurrency', config.concurrency))
-            config.retries = int(request.POST.get('retries', config.retries))
-            config.max_host_errors = int(request.POST.get('max_host_errors', config.max_host_errors))
+            # Helper function to safely convert to int
+            def safe_int(value, default):
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    return default
+
+            config.timeout = safe_int(request.POST.get('timeout'), config.timeout)
+            config.rate_limit = safe_int(request.POST.get('rate_limit'), config.rate_limit)
+            config.concurrency = safe_int(request.POST.get('concurrency'), config.concurrency)
+            config.retries = safe_int(request.POST.get('retries'), config.retries)
+            config.max_host_errors = safe_int(request.POST.get('max_host_errors'), config.max_host_errors)
 
             config.silent_mode = request.POST.get('silent_mode') == 'on'
             config.no_color = request.POST.get('no_color') == 'on'
