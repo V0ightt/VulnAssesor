@@ -166,10 +166,15 @@ This project is now ready for contributions!
 ### 🔮 Phase 5+: Advanced Features
 - SAST engine for code repositories
 - 24/7 uptime monitoring
+- SSL certificate checks
 - Alert notifications
-- PDF report generation
-- Compliance reports
+- Historical data analytics
 
+### 🔮 Phase 8: Advanced Reporting
+- PDF report generation
+- Compliance reports (OWASP Top 10, PCI-DSS)
+- Vulnerability trend analysis
+- Executive dashboards 
 ## 📄 License
 
 [Choose appropriate license - e.g., MIT, GPL, etc.]
@@ -177,16 +182,17 @@ This project is now ready for contributions!
 ## 🙏 Acknowledgments
 
 - **Nuclei** by ProjectDiscovery - Vulnerability scanner
+- **OpenAI** - GPT-4o for AI-powered analysis
 - **HTMX** - Dynamic HTML updates
 - **Alpine.js** - Lightweight JavaScript framework
 - **Django** - Web framework
+- **Pygments** - Syntax highlighting
 
 ## 📧 Contact
 
-- **Issues:** [GitHub Issues](link-to-issues)
-- **Discussions:** [GitHub Discussions](link-to-discussions)
-- **Discord:** [your-email]
-- **LinkedIn:** [your-email]
+- **Issues:** [GitHub Issues](https://github.com/V0ightt/VulnAssesor/issues)
+- **Discord:** v0ight_
+- **LinkedIn:** [Momen Saeb](https://www.linkedin.com/in/momen-saeb-b88183283/)
 
 ---
 
