@@ -1,14 +1,28 @@
-# Phase 3 Testing Checklist
+# Phase 4 Testing Checklist (DAST + SAST with AI)
 
 ## Pre-Testing Setup
 
-- [ ] Migrations have been applied
+### General Setup
+- [ ] Migrations have been applied (Dashboard + SAST apps)
 - [ ] Docker containers are running (if using Docker)
 - [ ] Celery worker is running
 - [ ] Redis is accessible
-- [ ] Nuclei is installed (check with `nuclei -version` in container)
 - [ ] At least one user account exists
+
+### DAST Setup
+- [ ] Nuclei is installed (check with `nuclei -version` in container)
 - [ ] At least one website has been added
+- [ ] At least one Nuclei template exists
+
+### SAST Setup (NEW - Phase 4)
+- [ ] OpenAI API key is set as environment variable (`OPENAI_API_KEY`)
+- [ ] Media directory is writable (`media/projects/`)
+- [ ] Git is available in the environment (for Git cloning)
+- [ ] Test project/repository is available
+
+---
+
+## DAST (Dynamic Scanning) Tests
 
 ## Template Management Tests
 
@@ -302,16 +316,235 @@
 - [ ] Scan a non-existent URL (should timeout or fail gracefully)
 - [ ] Template with syntax errors (Nuclei should report)
 
+---
+
+## SAST (Static Analysis with AI) Tests (Phase 4 - NEW)
+
+### Project Creation - Git Repository
+
+- [ ] Navigate to `/sast/projects/`
+- [ ] Click "New Project" button
+- [ ] Form loads with Git URL and ZIP upload options
+- [ ] Enter a valid Git repository URL
+- [ ] Enter project name
+- [ ] Click "Create Project"
+- [ ] Success message appears
+- [ ] Redirected to project detail page
+- [ ] Project status shows "PENDING" or "CLONING"
+- [ ] Status updates to "READY" when cloning completes
+- [ ] Check Celery logs for ingest task execution
+
+### Project Creation - ZIP Upload
+
+- [ ] Create a ZIP file with source code (.py, .js, etc.)
+- [ ] Navigate to `/sast/projects/new/`
+- [ ] Enter project name
+- [ ] Upload ZIP file
+- [ ] Click "Create Project"
+- [ ] Success message appears
+- [ ] Project status shows "CLONING"
+- [ ] Status updates to "READY" when extraction completes
+- [ ] Workspace directory created in `media/projects/<id>/`
+
+### File Explorer
+
+- [ ] Once project is READY, file explorer loads
+- [ ] Directory structure is displayed
+- [ ] Folders show with folder icon
+- [ ] Files show with file icon
+- [ ] Click on a folder to navigate into it
+- [ ] Breadcrumb navigation works
+- [ ] Click on a file to view it
+- [ ] File viewer loads with syntax highlighting
+- [ ] Code is formatted correctly (Monokai theme)
+- [ ] Line numbers are visible
+- [ ] Syntax highlighting matches file type (.py=Python, .js=JavaScript, etc.)
+- [ ] Can navigate back to parent directory
+
+### SAST Scan Initiation
+
+- [ ] Project is in READY status
+- [ ] "Start SAST Scan" button is visible
+- [ ] Click "Start SAST Scan"
+- [ ] Any existing PENDING/SCANNING scans are cancelled
+- [ ] New SASTScanJob is created with status="PENDING"
+- [ ] Redirected to project detail page
+- [ ] Scan appears in "Latest Scan" section
+- [ ] HTMX polling starts (check Network tab)
+- [ ] Status badge shows "PENDING" with spinner
+
+### Real-Time Scan Status Updates (AI Scanning)
+
+- [ ] Watch scan status update via HTMX
+- [ ] Status changes: PENDING → SCANNING
+- [ ] Spinner/loading indicator is visible
+- [ ] Status badge color changes (yellow for SCANNING)
+- [ ] Check Celery logs for scan progress
+- [ ] AI makes requests to OpenAI API (check logs)
+- [ ] After completion, status changes to COMPLETED
+- [ ] Green checkmark appears
+- [ ] HTMX polling stops
+- [ ] Completion timestamp is displayed
+
+### Scan Cancellation
+
+- [ ] Start a SAST scan
+- [ ] While status is PENDING or SCANNING, click "Cancel Scan"
+- [ ] Status updates to CANCELLED
+- [ ] Scan stops processing files
+- [ ] Can start a new scan after cancellation
+
+### SAST Results - No Findings
+
+- [ ] Scan a project with clean, secure code
+- [ ] Wait for scan to complete
+- [ ] Results section shows "No vulnerabilities found"
+- [ ] Positive message is displayed
+- [ ] Scan summary shows 0 findings
+
+### SAST Results - With Findings
+
+- [ ] Scan a project with known vulnerabilities
+- [ ] Wait for scan to complete (may take 1-10 minutes)
+- [ ] Findings section displays
+- [ ] Summary shows total finding counts by severity
+- [ ] Severity breakdown: CRITICAL, HIGH, MEDIUM, LOW, INFO
+- [ ] Each finding card shows:
+  - [ ] File path
+  - [ ] Line number
+  - [ ] Severity badge (color-coded)
+  - [ ] Vulnerability title
+  - [ ] Description
+  - [ ] AI-generated explanation (plain English)
+  - [ ] Code snippet showing vulnerable code
+  - [ ] Proposed fix section
+
+### AI-Generated Fixes
+
+- [ ] Each finding has a "Proposed Fix" section
+- [ ] Fixed code is displayed
+- [ ] Explanation of the fix is provided
+- [ ] Fix verification status is shown
+- [ ] Verified fixes are marked with checkmark
+- [ ] Unverified/failed fixes are marked with warning
+
+### Fix Verification
+
+- [ ] Check findings that passed verification
+- [ ] Verification reasoning is displayed
+- [ ] Check findings that failed verification
+- [ ] Failure reasoning is displayed
+- [ ] Both types of fixes are saved and visible
+
+### Scan History
+
+- [ ] Project detail page shows "Recent Scans" section
+- [ ] Last 10 scans are listed
+- [ ] Each scan shows:
+  - [ ] Scan ID
+  - [ ] Status
+  - [ ] Start time
+  - [ ] Finding counts
+- [ ] Can click on historical scan to view results
+- [ ] Newest scans appear first
+
+### Multi-Language Support
+
+- [ ] Test with Python files (.py) - syntax highlighting works
+- [ ] Test with JavaScript files (.js) - AI detects JS vulnerabilities
+- [ ] Test with TypeScript files (.ts)
+- [ ] Test with Java files (.java)
+- [ ] Test with C files (.c)
+- [ ] Test with Go files (.go)
+- [ ] Test with PHP files (.php)
+- [ ] Test with HTML files (.html)
+- [ ] Test with CSS files (.css)
+- [ ] All supported languages are scanned and highlighted correctly
+
+### Context-Aware Analysis
+
+- [ ] Create a project with `agents.md` file
+- [ ] Create a project with `README.md` file
+- [ ] Start SAST scan
+- [ ] Check Celery logs - AI reads context files
+- [ ] AI recommendations reference project architecture
+- [ ] Context files limited to 2000 chars (check truncation)
+
+### OpenAI API Integration
+
+- [ ] Verify `OPENAI_API_KEY` is set
+- [ ] Scan starts successfully
+- [ ] Check Celery logs for API requests
+- [ ] API responses include structured data (Pydantic)
+- [ ] Handle API rate limiting gracefully (if applicable)
+- [ ] Handle API errors without crashing scan
+
+### Project Deletion
+
+- [ ] Navigate to project detail page
+- [ ] Click "Delete Project" button
+- [ ] Confirmation modal appears (if implemented)
+- [ ] Confirm deletion
+- [ ] Project is removed from database
+- [ ] Workspace directory is deleted (`media/projects/<id>/`)
+- [ ] Associated scans are deleted (CASCADE)
+- [ ] Associated findings are deleted (CASCADE)
+- [ ] Redirected to project list
+
+### Error Handling - SAST
+
+- [ ] Try creating project without Git URL or ZIP file
+- [ ] Error message appears
+- [ ] Try invalid Git URL
+- [ ] Ingest task fails gracefully, status="FAILED"
+- [ ] Try uploading invalid ZIP file
+- [ ] Error is handled, status="FAILED"
+- [ ] Start scan without OpenAI API key
+- [ ] Scan fails with clear error message
+- [ ] Simulate OpenAI API being down
+- [ ] Error is logged, scan fails gracefully
+
+### Permission Tests - SAST
+
+- [ ] Create second user account
+- [ ] User A cannot see User B's projects
+- [ ] User A cannot access User B's project detail via URL
+- [ ] User A cannot delete User B's projects
+- [ ] User A cannot start scans on User B's projects
+
+### Performance Tests - SAST
+
+- [ ] Scan a small project (5-10 files)
+- [ ] Scan completes in reasonable time (< 5 minutes)
+- [ ] Scan a medium project (20-50 files)
+- [ ] Scan completes without errors (5-15 minutes)
+- [ ] Scan a large project (100+ files)
+- [ ] Monitor performance, check for timeout issues
+- [ ] Multiple files scanned without memory issues
+
+### Integration - DAST + SAST
+
+- [ ] User has both websites and projects
+- [ ] Dashboard shows both DAST and SAST scans
+- [ ] Can navigate between DAST and SAST sections
+- [ ] Both scan types use same HTMX polling mechanism
+- [ ] No conflicts or interference between scan types
+
+---
+
 ## Final Verification
 
 - [ ] No errors in browser console
 - [ ] No errors in Django server logs
 - [ ] No errors in Celery worker logs
-- [ ] All pages load in < 2 seconds
+- [ ] All DAST pages load in < 2 seconds
+- [ ] All SAST pages load in < 2 seconds (excluding AI processing)
 - [ ] UI is consistent and professional
-- [ ] Dark theme is applied everywhere
+- [ ] Dark theme is applied everywhere (DAST and SAST)
 - [ ] All animations are smooth
 - [ ] User experience is intuitive
+- [ ] OpenAI API key is secure (environment variable)
+- [ ] Project workspaces are properly isolated
 
 ## Sign-Off
 
@@ -321,7 +554,11 @@ Tester: _______________
 
 Issues Found: _______________
 
-Status: ⬜ Pass ⬜ Fail ⬜ Partial
+Phase 3 (DAST): ⬜ Pass ⬜ Fail ⬜ Partial
+
+Phase 4 (SAST): ⬜ Pass ⬜ Fail ⬜ Partial
+
+Overall Status: ⬜ Pass ⬜ Fail ⬜ Partial
 
 Notes:
 _________________________________
@@ -338,40 +575,67 @@ For rapid testing, run these commands:
 # 1. Check services
 docker-compose ps
 
-# 2. Check Nuclei
+# 2. Check Nuclei (DAST)
 docker-compose exec web nuclei -version
 
-# 3. Check database
+# 3. Check OpenAI API key (SAST)
+docker-compose exec web python -c "import os; print('API Key:', 'SET' if os.getenv('OPENAI_API_KEY') else 'NOT SET')"
+
+# 4. Check database tables
 docker-compose exec web python manage.py dbshell
 \dt  # List tables
-\d Dashboard_nucleitemplate  # Describe table
+\d Dashboard_nucleitemplate  # DAST tables
 \d Dashboard_scanjob
 \d Dashboard_scanresult
+\d SAST_project              # SAST tables
+\d SAST_sastscanjob
+\d SAST_sastfinding
+\d SAST_sastfix
 
-# 4. Create test data
+# 5. Create test DAST data
 docker-compose exec web python manage.py shell
 from Dashboard.models import *
 from django.contrib.auth.models import User
 user = User.objects.first()
 # Create test template, scan, etc.
 
-# 5. Monitor logs in real-time
-docker-compose logs -f celery
+# 6. Create test SAST data
+from SAST.models import *
+project = Project.objects.create(name="Test", repository_url="https://github.com/user/repo", owner=user)
+
+# 7. Monitor DAST logs in real-time
+docker-compose logs -f celery | grep specialist
+
+# 8. Monitor SAST logs in real-time
+docker-compose logs -f celery | grep sast
+
+# 9. Check project workspaces
+ls -la media/projects/
 ```
 
 ## Automated Test Suite (Future)
 
 Consider implementing:
-- [ ] Unit tests for models
-- [ ] Unit tests for views
-- [ ] Integration tests for scan workflow
-- [ ] Selenium tests for UI
+- [ ] Unit tests for Dashboard models
+- [ ] Unit tests for SAST models
+- [ ] Unit tests for Dashboard views
+- [ ] Unit tests for SAST views
+- [ ] Integration tests for DAST scan workflow
+- [ ] Integration tests for SAST scan workflow with mock OpenAI
+- [ ] Selenium tests for UI (both DAST and SAST)
 - [ ] Load tests with Locust
 - [ ] API tests with pytest
+- [ ] AI response validation tests
+- [ ] Fix generation tests
+- [ ] Workspace isolation tests
 
 ---
 
-**Testing Status**: ⬜ Not Started ⬜ In Progress ⬜ Complete
+**Testing Status**: 
+- Phase 3 (DAST): ⬜ Not Started ⬜ In Progress ⬜ Complete
+- Phase 4 (SAST): ⬜ Not Started ⬜ In Progress ⬜ Complete
 
 **Ready for Production**: ⬜ Yes ⬜ No ⬜ With Fixes
+
+**AI Integration Working**: ⬜ Yes ⬜ No ⬜ Partial
 
