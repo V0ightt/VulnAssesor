@@ -9,21 +9,21 @@
 
 ### Current Features (Phase 4 - Implemented)
 
-* ✅ **SAST (Static Application Security Testing):** AI-powered code vulnerability scanning with automated fix generation
-* ✅ **DAST (Dynamic Application Security Testing):** Live website vulnerability scanning using Nuclei
-* ✅ **AI Integration:** OpenAI GPT-4o analyzes vulnerabilities, provides plain-English explanations, and generates code fixes
-* ✅ **Custom Templates:** Create and manage your own Nuclei scan templates
-* ✅ **Real-time Updates:** Watch scan progress with HTMX-powered live status updates
-* ✅ **Detailed Reports:** Severity-based vulnerability breakdowns with JSON export
-* ✅ **Configurable Scanner:** Web-based Nuclei configuration (no code changes needed)
-* ✅ **Pre-loaded Templates:** Ready-to-use security checks included
+*  **SAST (Static Application Security Testing):** AI-powered code vulnerability scanning with automated fix generation
+*  **DAST (Dynamic Application Security Testing):** Live website vulnerability scanning using Nuclei
+*  **AI Integration:** OpenAI GPT-4o analyzes vulnerabilities, provides plain-English explanations, and generates code fixes
+*  **Custom Templates:** Create and manage your own Nuclei scan templates
+*  **Real-time Updates:** Watch scan progress with HTMX-powered live status updates
+*  **Detailed Reports:** Severity-based vulnerability breakdowns with JSON export
+*  **Configurable Scanner:** Web-based Nuclei configuration (no code changes needed)
+*  **Pre-loaded Templates:** Ready-to-use security checks included
 
 ### Coming Soon (Phase 5+)
 
-* 🚀 **Fix Application:** Apply AI-generated fixes directly to repositories
-* 🚀 **Pull Request Automation:** Automatic branch creation and PR generation
-* 🚀 **AI-Enhanced DAST:** AI analysis for Nuclei findings
-* 🚀 **Comprehensive Reporting:** PDF reports, compliance checks, and alerts
+*  **Fix Application:** Apply AI-generated fixes directly to repositories
+*  **Pull Request Automation:** Automatic branch creation and PR generation
+*  **AI-Enhanced DAST:** AI analysis for Nuclei findings
+*  **Comprehensive Reporting:** PDF reports, compliance checks, and alerts
 
 
 ## 🚀 Quick Start
