@@ -7,9 +7,8 @@ from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from .tasks import simple_test_task, run_specialist_scan
-from .models import Website, NucleiTemplate, ScanJob, ScanResult, NucleiConfig
+from .models import Website, NucleiTemplate, ScanJob, NucleiConfig
 import subprocess
-from celery.result import AsyncResult
 from VulnAssesor.celery import app as celery_app
 
 # Authentication Views

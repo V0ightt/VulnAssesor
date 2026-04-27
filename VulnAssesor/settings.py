@@ -159,3 +159,54 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
+
+# SAST tool-driven scan settings
+SAST_SCAN_MAX_TOOL_CALLS = int(os.environ.get('SAST_SCAN_MAX_TOOL_CALLS', '24'))
+SAST_SCAN_MAX_SEARCH_RESULTS = int(os.environ.get('SAST_SCAN_MAX_SEARCH_RESULTS', '30'))
+SAST_SCAN_MAX_READ_LINES = int(os.environ.get('SAST_SCAN_MAX_READ_LINES', '160'))
+SAST_SCAN_MAX_DIRECTORY_ENTRIES = int(os.environ.get('SAST_SCAN_MAX_DIRECTORY_ENTRIES', '200'))
+SAST_SCAN_MAX_TOOL_RESULT_BYTES = int(os.environ.get('SAST_SCAN_MAX_TOOL_RESULT_BYTES', '12000'))
+SAST_SCAN_SOFT_CONTEXT_TOKENS = int(os.environ.get('SAST_SCAN_SOFT_CONTEXT_TOKENS', '8000'))
+SAST_SCAN_HARD_CONTEXT_TOKENS = int(os.environ.get('SAST_SCAN_HARD_CONTEXT_TOKENS', '12000'))
+SAST_SCAN_IGNORED_DIRECTORIES = [
+    '.git',
+    'node_modules',
+    'dist',
+    'build',
+    'coverage',
+    '.venv',
+    'venv',
+    '__pycache__',
+    '.mypy_cache',
+    '.pytest_cache',
+    '.tox',
+    '.idea',
+    '.vscode',
+]
+SAST_SCAN_ALLOWED_EXTENSIONS = [
+    '.py',
+    '.js',
+    '.jsx',
+    '.ts',
+    '.tsx',
+    '.html',
+    '.css',
+    '.java',
+    '.c',
+    '.cpp',
+    '.cc',
+    '.go',
+    '.rs',
+    '.php',
+    '.rb',
+    '.cs',
+    '.json',
+    '.yaml',
+    '.yml',
+    '.toml',
+    '.ini',
+    '.env',
+    '.sql',
+    '.sh',
+    '.xml',
+]

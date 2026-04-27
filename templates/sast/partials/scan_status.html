@@ -109,6 +109,11 @@
                     <div style="background-color: #0d1117; border-radius: 6px; border: 1px solid #30363d; overflow: hidden;">
                         <div style="padding: 8px 15px; background-color: #21262d; border-bottom: 1px solid #30363d; font-size: 0.85em; color: #8b949e;">
                             Proposed Change
+                            {% if finding.fix.scope == 'SNIPPET' %}
+                                <span style="margin-left: 8px; color: #3fb950;">{{ finding.fix.start_line }}-{{ finding.fix.end_line }}</span>
+                            {% else %}
+                                <span style="margin-left: 8px; color: #58a6ff;">Full File Replacement</span>
+                            {% endif %}
                         </div>
                         <pre style="margin: 0; padding: 15px; overflow-x: auto; color: #3fb950;"><code style="font-family: 'Courier New', monospace;">{{ finding.fix.proposed_code }}</code></pre>
                     </div>

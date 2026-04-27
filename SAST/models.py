@@ -43,6 +43,7 @@ class SASTScanJob(models.Model):
     completed_at = models.DateTimeField(blank=True, null=True)
     commit_hash = models.CharField(max_length=40, blank=True, null=True)
     scan_type = models.CharField(max_length=20, choices=SCAN_TYPE_CHOICES, default='FULL')
+    agent_run_metadata = models.JSONField(default=dict, blank=True)
 
     def __str__(self):
         return f"{self.project.name} - {self.get_scan_type_display()} ({self.status})"
@@ -77,10 +78,18 @@ class SASTFix(models.Model):
         ('REJECTED', 'Rejected'),
     ]
 
+    SCOPE_CHOICES = [
+        ('SNIPPET', 'Snippet'),
+        ('FILE', 'File'),
+    ]
+
     finding = models.OneToOneField(SASTFinding, on_delete=models.CASCADE, related_name='fix')
     proposed_code = models.TextField()
     explanation = models.TextField()
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='SNIPPET')
+    start_line = models.IntegerField(default=1)
+    end_line = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

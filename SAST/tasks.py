@@ -1,9 +1,9 @@
 from celery import shared_task
 from django.utils import timezone
-from .models import Project, SASTScanJob, SASTFinding, SASTFix
+from .models import Project, SASTScanJob
 from .services import ProjectManager
-from .agent import SASTAgent
-from .sast_tools import list_project_files, read_file, report_vulnerability, apply_fix
+from .agent import SASTAgent, ScanCancelledError
+from .sast_tools import report_vulnerability, apply_fix
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ def ingest_project_task(project_id):
         elif project.source_zip:
             manager.extract_zip()
         
+        project.root_directory = str(manager.workspace_root)
         project.status = 'READY'
         project.save()
         return f"Project {project.name} ingested successfully."
@@ -37,75 +38,68 @@ def ingest_project_task(project_id):
 def run_sast_scan(scan_job_id):
     try:
         scan_job = SASTScanJob.objects.get(id=scan_job_id)
-        scan_job.status = 'SCANNING'
-        scan_job.save()
-        
         project = scan_job.project
+        if project.status != 'READY':
+            scan_job.status = 'FAILED'
+            scan_job.agent_run_metadata = {
+                'stop_reason': 'project_not_ready',
+                'error': f"Project status is {project.status}. Scan can only start when the project is READY.",
+            }
+            scan_job.save(update_fields=['status', 'agent_run_metadata'])
+            return f"Scan failed: project {project.id} is not ready."
+
+        scan_job.status = 'SCANNING'
+        manager = ProjectManager(project)
+        scan_job.commit_hash = manager.get_repository_head_commit()
+        scan_job.save()
+
         try:
-            agent = SASTAgent(project)
+            agent = SASTAgent(project, scan_job=scan_job)
         except ValueError as e:
             logger.error(f"SAST Agent initialization failed: {e}")
             scan_job.status = 'FAILED'
             scan_job.save()
             return f"Scan failed: {e}"
-        
-        # Get list of files to scan
-        files = list_project_files(project)
-        
-        for file_path in files:
-            # Check for cancellation
-            scan_job.refresh_from_db()
+
+        findings = agent.scan_project()
+        scan_job.agent_run_metadata = agent.last_scan_metadata
+        scan_job.save(update_fields=['agent_run_metadata'])
+
+        for finding_data in findings:
+            scan_job.refresh_from_db(fields=['status'])
             if scan_job.status == 'CANCELLED':
                 logger.info(f"Scan {scan_job_id} cancelled by user.")
                 return f"Scan {scan_job_id} cancelled."
 
-            try:
-                content = read_file(project, file_path)
-                findings = agent.scan_code(file_path, content)
-                
-                logger.info(f"File: {file_path} - Findings: {len(findings)}")
+            finding = report_vulnerability(
+                scan_job=scan_job,
+                file_path=finding_data['file_path'],
+                line_number=finding_data['line_number'],
+                severity=finding_data['severity'],
+                title=finding_data['title'],
+                description=finding_data['description'],
+                code_snippet=finding_data['code_snippet'],
+            )
+            finding.ai_explanation = finding_data.get('ai_explanation', '')
+            finding.save()
 
-                for finding_data in findings:
-                    # Save finding
-                    finding = report_vulnerability(
-                        scan_job=scan_job,
-                        file_path=file_path,
-                        line_number=finding_data['line_number'],
-                        severity=finding_data['severity'],
-                        title=finding_data['title'],
-                        description=finding_data['description'],
-                        code_snippet=finding_data['code_snippet']
-                    )
-                    finding.ai_explanation = finding_data.get('ai_explanation', '')
-                    finding.save()
-                    
-                    # Generate Fix
-                    fix_data = agent.generate_fix(finding_data, content)
-                    
-                    # Verify Fix (Loop)
-                    verification = agent.verify_fix(content, fix_data['fixed_code'], finding_data['title'])
-                    
-                    if verification['verified']:
-                        apply_fix(
-                            finding_id=finding.id,
-                            proposed_code=fix_data['fixed_code'],
-                            explanation=fix_data['explanation']
-                        )
-                    else:
-                        # In a real scenario, we might retry here
-                        logger.warning(f"Fix verification failed for {finding.title}: {verification['reason']}")
-                        # Still save the fix but maybe mark it as unverified or rejected?
-                        # For now, we'll save it but append a note to the explanation
-                        apply_fix(
-                            finding_id=finding.id,
-                            proposed_code=fix_data['fixed_code'],
-                            explanation=f"Verification Failed: {verification['reason']}\n\nOriginal Explanation: {fix_data['explanation']}"
-                        )
-                        
-            except Exception as e:
-                logger.error(f"Error scanning file {file_path}: {str(e)}")
-                continue
-                
+            fix_data = agent.generate_fix(finding_data)
+            verification = agent.verify_fix(finding_data, fix_data)
+
+            explanation = fix_data['explanation']
+            if not verification['verified']:
+                logger.warning(f"Fix verification failed for {finding.title}: {verification['reason']}")
+                explanation = f"Verification Failed: {verification['reason']}\n\nOriginal Explanation: {explanation}"
+
+            apply_fix(
+                finding_id=finding.id,
+                proposed_code=fix_data['fixed_code'],
+                explanation=explanation,
+                scope=fix_data['scope'],
+                start_line=fix_data['start_line'],
+                end_line=fix_data['end_line'],
+            )
+
         scan_job.status = 'COMPLETED'
         scan_job.completed_at = timezone.now()
         scan_job.save()
@@ -115,11 +109,26 @@ def run_sast_scan(scan_job_id):
         
         return f"Scan {scan_job_id} completed."
         
+    except ScanCancelledError:
+        if 'scan_job' in locals():
+            scan_job.agent_run_metadata = {
+                **getattr(agent, 'last_scan_metadata', {}),
+                'stop_reason': 'cancelled',
+            }
+            scan_job.save(update_fields=['agent_run_metadata'])
+        return f"Scan {scan_job_id} cancelled."
     except SASTScanJob.DoesNotExist:
         return f"ScanJob {scan_job_id} not found."
     except Exception as e:
         logger.error(f"Error running scan {scan_job_id}: {str(e)}")
         if 'scan_job' in locals():
             scan_job.status = 'FAILED'
+            if 'agent' in locals():
+                agent.last_scan_metadata = {
+                    **getattr(agent, 'last_scan_metadata', {}),
+                    'stop_reason': 'failed',
+                    'error': str(e),
+                }
+                scan_job.agent_run_metadata = agent.last_scan_metadata
             scan_job.save()
         return f"Error running scan: {str(e)}"

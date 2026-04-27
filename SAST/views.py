@@ -41,12 +41,17 @@ def project_detail(request, project_id):
     project = get_object_or_404(Project, id=project_id, owner=request.user)
     latest_scan = project.scans.order_by('-created_at').first()
     scan_history = project.scans.order_by('-created_at')[:10] # Get last 10 scans
-    
-    return render(request, 'sast/project_detail.html', {
+
+    context = {
         'project': project, 
         'latest_scan': latest_scan,
         'scan_history': scan_history
-    })
+    }
+
+    if request.headers.get('HX-Request') == 'true':
+        return render(request, 'sast/partials/project_detail_content.html', context)
+
+    return render(request, 'sast/project_detail.html', context)
 
 @login_required
 @never_cache
@@ -98,6 +103,9 @@ def file_viewer(request, project_id):
 def start_scan(request, project_id):
     if request.method == 'POST':
         project = get_object_or_404(Project, id=project_id, owner=request.user)
+
+        if project.status != 'READY':
+            return redirect('project_detail', project_id=project.id)
         
         # Cancel any existing running scans for this project
         active_scans = SASTScanJob.objects.filter(
