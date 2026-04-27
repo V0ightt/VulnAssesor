@@ -8,6 +8,7 @@ urlpatterns = [
     path('projects/<int:project_id>/explorer/', views.file_explorer, name='file_explorer'),
     path('projects/<int:project_id>/viewer/', views.file_viewer, name='file_viewer'),
     path('projects/<int:project_id>/scan/', views.start_scan, name='start_scan'),
+    path('projects/<int:project_id>/cancel-ingestion/', views.cancel_ingestion, name='cancel_ingestion'),
     path('scans/<int:scan_id>/cancel/', views.cancel_scan, name='sast_cancel_scan'),
     path('scans/<int:scan_id>/status/', views.scan_status, name='sast_scan_status'),
     path('projects/<int:project_id>/delete/', views.project_delete, name='project_delete'),

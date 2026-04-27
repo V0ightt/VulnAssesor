@@ -15,9 +15,11 @@ class Project(models.Model):
         ('PENDING', 'Pending'),
         ('CLONING', 'Cloning'),
         ('READY', 'Ready'),
+        ('CANCELLED', 'Cancelled'),
         ('FAILED', 'Failed'),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    ingestion_task_id = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return self.name

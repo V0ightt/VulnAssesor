@@ -2,6 +2,7 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
 from django.http import HttpResponse, JsonResponse
+from celery.result import AsyncResult
 from .models import Project, SASTScanJob, SASTFinding
 from .services import ProjectManager
 from .tasks import ingest_project_task, run_sast_scan
@@ -30,7 +31,9 @@ def project_create(request):
         )
         
         # Trigger initial setup (clone/extract) asynchronously
-        ingest_project_task.delay(project.id)
+        ingestion_task = ingest_project_task.delay(project.id)
+        project.ingestion_task_id = ingestion_task.id
+        project.save(update_fields=['ingestion_task_id'])
         
         return redirect('project_detail', project_id=project.id)
     
@@ -133,6 +136,16 @@ def cancel_scan(request, scan_id):
             scan.status = 'CANCELLED'
             scan.save()
     return redirect('project_detail', project_id=scan.project.id)
+
+@login_required
+def cancel_ingestion(request, project_id):
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    if request.method == 'POST' and project.status in ['PENDING', 'CLONING']:
+        if project.ingestion_task_id:
+            AsyncResult(project.ingestion_task_id).revoke(terminate=True)
+        project.status = 'CANCELLED'
+        project.save(update_fields=['status'])
+    return redirect('project_detail', project_id=project.id)
 
 @login_required
 def project_delete(request, project_id):

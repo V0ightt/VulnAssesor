@@ -3,7 +3,7 @@
      style="padding: 30px; max-width: 1400px; margin: 0 auto;"
      {% if project.status != 'READY' %}
      hx-get="{% url 'project_detail' project.id %}"
-     hx-trigger="load, every 3s"
+    hx-trigger="every 8s"
      hx-swap="outerHTML"
      {% endif %}>
 
@@ -34,8 +34,16 @@
                 </form>
             {% elif project.status != 'READY' %}
                 <button type="button" style="background-color: #30363d; color: #8b949e; border: none; padding: 10px 20px; border-radius: 6px; cursor: not-allowed; font-weight: 600;" disabled>
-                    Project Ingesting...
+                    {% if project.status == 'CANCELLED' %}Ingestion Stopped{% else %}Project Ingesting...{% endif %}
                 </button>
+                {% if project.status == 'PENDING' or project.status == 'CLONING' %}
+                <form method="post" action="{% url 'cancel_ingestion' project.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger" style="background-color: #da3633; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                        Stop Ingestion
+                    </button>
+                </form>
+                {% endif %}
             {% else %}
                 <form method="post" action="{% url 'start_scan' project.id %}">
                     {% csrf_token %}
@@ -65,10 +73,27 @@
                     </button>
                 </form>
             {% else %}
-                <p style="color: #8b949e; margin-bottom: 20px;">Project ingestion is still running. Scanning will be available when the project is ready.</p>
+                {% if project.status == 'CANCELLED' %}
+                <p style="color: #8b949e; margin-bottom: 20px;">Project ingestion was stopped. You can delete this project and create it again when ready.</p>
                 <button type="button" style="background-color: #30363d; color: #8b949e; border: none; padding: 10px 20px; border-radius: 6px; cursor: not-allowed; font-weight: 600;" disabled>
-                    Project Ingesting...
+                    Ingestion Stopped
                 </button>
+                {% else %}
+                <p style="color: #8b949e; margin-bottom: 20px;">Project ingestion is still running. Scanning will be available when the project is ready.</p>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button type="button" style="background-color: #30363d; color: #8b949e; border: none; padding: 10px 20px; border-radius: 6px; cursor: not-allowed; font-weight: 600;" disabled>
+                        Project Ingesting...
+                    </button>
+                    {% if project.status == 'PENDING' or project.status == 'CLONING' %}
+                    <form method="post" action="{% url 'cancel_ingestion' project.id %}">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger" style="background-color: #da3633; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                            Stop Ingestion
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+                {% endif %}
             {% endif %}
         </div>
     {% endif %}

@@ -8,30 +8,41 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-@shared_task
-def ingest_project_task(project_id):
+@shared_task(bind=True)
+def ingest_project_task(self, project_id):
     try:
         project = Project.objects.get(id=project_id)
+        if project.status == 'CANCELLED':
+            return f"Project {project.name} ingestion was cancelled before start."
+
+        if project.ingestion_task_id != self.request.id:
+            project.ingestion_task_id = self.request.id
         project.status = 'CLONING'
-        project.save()
+        project.save(update_fields=['ingestion_task_id', 'status'])
 
         manager = ProjectManager(project)
         if project.repository_url:
             manager.clone_repository()
         elif project.source_zip:
             manager.extract_zip()
+
+        project.refresh_from_db(fields=['status'])
+        if project.status == 'CANCELLED':
+            return f"Project {project.name} ingestion cancelled by user."
         
         project.root_directory = str(manager.workspace_root)
         project.status = 'READY'
-        project.save()
+        project.save(update_fields=['root_directory', 'status'])
         return f"Project {project.name} ingested successfully."
     except Project.DoesNotExist:
         return f"Project {project_id} not found."
     except Exception as e:
         logger.error(f"Error ingesting project {project_id}: {str(e)}")
         if 'project' in locals():
-            project.status = 'FAILED'
-            project.save()
+            project.refresh_from_db(fields=['status'])
+            if project.status != 'CANCELLED':
+                project.status = 'FAILED'
+                project.save(update_fields=['status'])
         return f"Error ingesting project: {str(e)}"
 
 @shared_task
