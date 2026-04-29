@@ -38,6 +38,8 @@ services:
       - POSTGRES_HOST=db
       - DJANGO_ALLOWED_HOSTS=*
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     depends_on:
       - db
       - redis
@@ -54,6 +56,8 @@ services:
       - POSTGRES_PASSWORD=strongpassword
       - POSTGRES_HOST=db
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     depends_on:
       - db
       - redis

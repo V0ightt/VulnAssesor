@@ -1,16 +1,13 @@
 import json
-import logging
-import os
 from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional
 
 from django.conf import settings
-from openai import OpenAI
+from Dashboard.models import AIConfig
 from pydantic import BaseModel, Field
+from .llm import build_provider
 from .sast_tools import list_directory, read_file, search_codebase
-
-logger = logging.getLogger(__name__)
 
 # --- Structured Outputs (Pydantic) ---
 class Vulnerability(BaseModel):
@@ -172,19 +169,17 @@ class ExplorationResult:
 
 class SASTAgent:
     def __init__(self, project, scan_job=None):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is not set.")
-             
-        self.client = OpenAI(api_key=api_key)
+        self.ai_config = AIConfig.get_config()
+        self.provider = build_provider(self.ai_config)
         self.project = project
         self.scan_job = scan_job
         self.system_context = self._load_project_context()
         self.last_scan_metadata = {}
         self.tool_definitions = self._build_tool_definitions()
-        self.scan_model = "gpt-5-nano"
-        self.fix_model = "gpt-5-nano"
-        self.verify_model = "gpt-5-nano"
+        provider_settings = self.ai_config.selected_provider_settings()
+        self.scan_model = provider_settings['scan_model']
+        self.fix_model = provider_settings['fix_model']
+        self.verify_model = provider_settings['verify_model']
 
     def _load_project_context(self):
         """
@@ -347,42 +342,38 @@ class SASTAgent:
             soft_token_threshold=settings.SAST_SCAN_SOFT_CONTEXT_TOKENS,
             hard_token_threshold=settings.SAST_SCAN_HARD_CONTEXT_TOKENS,
         )
-        conversation_items = [
-            {"role": "system", "content": self.system_context},
-            {"role": "user", "content": task_prompt},
-        ]
+        conversation = self.provider.start_conversation(self.system_context, task_prompt)
         stop_reason = 'completed'
         final_response_text = ''
 
         while memory.total_calls < max_calls:
             self._ensure_scan_active()
-            response = self.client.responses.create(
+            response = self.provider.create_tool_response(
                 model=model,
-                input=conversation_items,
+                conversation=conversation,
                 tools=self.tool_definitions,
             )
-            function_calls = [
-                item for item in getattr(response, 'output', [])
-                if getattr(item, 'type', None) == 'function_call'
-            ]
-            if not function_calls:
-                final_response_text = self._extract_output_text(response)
+            if not response.tool_calls:
+                final_response_text = response.output_text
                 return ExplorationResult(
                     final_response_text=final_response_text,
                     stop_reason=stop_reason,
                     memory=memory,
                 )
 
-            conversation_items.extend(self._serialize_response_items(getattr(response, 'output', [])))
-            for function_call in function_calls:
+            tool_results = []
+            for function_call in response.tool_calls:
                 self._ensure_scan_active()
                 arguments = json.loads(function_call.arguments or '{}')
                 result = self._dispatch_tool_call(function_call.name, arguments)
-                output_item = memory.record_tool_result(function_call.name, arguments, function_call.call_id, result)
-                conversation_items.append(output_item)
+                memory.record_tool_result(function_call.name, arguments, function_call.call_id, result)
+                tool_results.append((function_call, result))
                 if memory.total_calls >= max_calls:
                     stop_reason = 'tool_budget_exhausted'
                     break
+
+            if tool_results:
+                self.provider.append_tool_results(conversation, tool_results)
 
             if stop_reason == 'tool_budget_exhausted':
                 break
@@ -416,90 +407,8 @@ class SASTAgent:
             return {'error': str(exc), 'truncated': False}
         return {'error': f'Unknown tool: {tool_name}', 'truncated': False}
 
-    def _serialize_response_items(self, output_items):
-        serialized_items = []
-        for item in output_items:
-            raw_item = self._coerce_response_item(item)
-            if not raw_item:
-                continue
-            serialized_items.append(raw_item)
-        return serialized_items
-
-    def _coerce_response_item(self, item):
-        raw_item = None
-        if isinstance(item, dict):
-            raw_item = item
-        elif hasattr(item, 'model_dump'):
-            raw_item = item.model_dump(mode='json')
-        elif hasattr(item, '__dict__'):
-            raw_item = {
-                key: value for key, value in vars(item).items()
-                if not key.startswith('_')
-            }
-
-        if not raw_item:
-            return None
-
-        item_type = raw_item.get('type')
-        if item_type != 'function_call':
-            logger.debug("Skipping non-function response item of type %s during replay.", item_type)
-            return None
-
-        call_id = raw_item.get('call_id')
-        name = raw_item.get('name')
-        arguments = raw_item.get('arguments')
-        if not call_id or not name:
-            logger.warning("Skipping malformed function_call response item missing call_id or name.")
-            return None
-
-        if arguments is None:
-            arguments = '{}'
-        elif not isinstance(arguments, str):
-            arguments = json.dumps(arguments, ensure_ascii=True)
-
-        return {
-            'type': 'function_call',
-            'call_id': call_id,
-            'name': name,
-            'arguments': arguments,
-        }
-
     def _parse_structured_output(self, model, schema, system_prompt, user_prompt):
-        if hasattr(self.client.responses, 'parse'):
-            parsed = self.client.responses.parse(
-                model=model,
-                input=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                text_format=schema,
-            )
-            return parsed.output_parsed
-
-        completion = self.client.beta.chat.completions.parse(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format=schema,
-        )
-        return completion.choices[0].message.parsed
-
-    def _extract_output_text(self, response):
-        direct_text = getattr(response, 'output_text', '')
-        if direct_text:
-            return direct_text
-
-        chunks = []
-        for item in getattr(response, 'output', []):
-            if getattr(item, 'type', None) != 'message':
-                continue
-            for content in getattr(item, 'content', []):
-                text = getattr(content, 'text', '') or getattr(content, 'value', '')
-                if text:
-                    chunks.append(text)
-        return "\n".join(chunks)
+        return self.provider.parse_structured_output(model, schema, system_prompt, user_prompt)
 
     def _ensure_scan_active(self):
         if not self.scan_job:

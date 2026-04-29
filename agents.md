@@ -1,7 +1,7 @@
 # VulnAssesor Project Specification
 
-- **Last Updated:** April 27, 2026
-- **Current State:** Working Django 5.2 application with Nuclei DAST and OpenAI-backed SAST
+- **Last Updated:** April 29, 2026
+- **Current State:** Working Django 5.2 application with Nuclei DAST and configurable AI-backed SAST
 - **Operational Mode:** Development-oriented stack with background workers and live HTMX updates
 
 ---
@@ -11,7 +11,7 @@
 VulnAssesor is a Django-based security workspace for two related workflows:
 
 - **DAST** for live website scanning with Nuclei.
-- **SAST** for repository analysis using an OpenAI-backed agent that explores code with tool calls.
+- **SAST** for repository analysis using a configurable AI-backed agent that explores code with tool calls.
 
 The application is server-rendered, user-scoped, and intentionally simple to operate: users sign in, register websites or projects, launch scans, and review results in the browser. HTMX and Alpine.js provide the live interactions, while Celery and Redis handle background work.
 
@@ -27,7 +27,7 @@ This document is the implementation reference for the current repository. It sho
 - Celery
 - Redis
 - PostgreSQL in Docker, SQLite for local development
-- OpenAI API integration
+- OpenAI, Claude, and DeepSeek API integration for SAST
 - GitPython
 - Pygments
 - PyYAML
@@ -47,7 +47,9 @@ This document is the implementation reference for the current repository. It sho
 - The app is therefore best treated as a development or internal deployment until the settings are hardened
 
 ### Environment variables
-- `OPENAI_API_KEY` - required for SAST scanning and fix generation
+- `OPENAI_API_KEY` - required when the configured SAST provider is OpenAI
+- `ANTHROPIC_API_KEY` - required when the configured SAST provider is Claude
+- `DEEPSEEK_API_KEY` - required when the configured SAST provider is DeepSeek
 - `USE_SQLITE=True` - switch to SQLite
 - `DJANGO_ALLOWED_HOSTS` - comma-separated host list
 - `POSTGRES_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` - PostgreSQL connection settings
@@ -141,6 +143,38 @@ Behavior:
 - `jsonl_output` should stay enabled because the parser depends on JSON Lines output.
 - `custom_args` are appended at the end and are split with `shlex`.
 
+#### `AIConfig`
+Singleton configuration for the SAST AI backend.
+
+Fields:
+- `provider` - `openai`, `anthropic`, or `deepseek`
+- `openai_scan_model`
+- `openai_fix_model`
+- `openai_verify_model`
+- `anthropic_scan_model`
+- `anthropic_fix_model`
+- `anthropic_verify_model`
+- `deepseek_scan_model`
+- `deepseek_fix_model`
+- `deepseek_verify_model`
+- `openai_api_key_env_var`
+- `anthropic_api_key_env_var`
+- `deepseek_api_key_env_var`
+- `openai_base_url`
+- `anthropic_base_url`
+- `deepseek_base_url`
+- `max_output_tokens`
+- `request_timeout`
+- `updated_at`
+- `updated_by`
+
+Behavior:
+- `get_config()` returns or creates the singleton row.
+- API key values are never stored in the database; only environment variable names are stored.
+- `require_api_key()` fails fast with the missing environment variable name.
+- `key_statuses()` exposes configured/missing state for the configuration UI without exposing secret values.
+- `selected_provider_settings()` returns the active provider's API settings and provider-specific scan, fix, and verification models.
+
 #### `ScanJob`
 - `website`
 - `celery_task_id`
@@ -209,7 +243,7 @@ Indexes:
 - `/scan/<int:scan_pk>/results/` - `scan_results_view`
 
 #### Configuration and support
-- `/nuclei/config/` - `nuclei_config_view`
+- `/nuclei/config/` - `nuclei_config_view`, combined Nuclei and AI provider configuration
 - `/nuclei/update-templates/` - `nuclei_update_templates_view`
 - `/test-celery/` - `test_celery_view`
 
@@ -368,7 +402,7 @@ When a scan starts, `run_sast_scan`:
 2. Fails fast unless the project is `READY`.
 3. Sets the scan to `SCANNING`.
 4. Captures the repository head commit if the project is a Git checkout.
-5. Instantiates `SASTAgent` with the project and active scan job.
+5. Loads `AIConfig` and instantiates `SASTAgent` with the configured provider.
 6. Runs `scan_project()` to gather supported findings.
 7. Persists `SASTFinding` rows through `report_vulnerability`.
 8. Generates a fix with `generate_fix(finding)`.
@@ -430,7 +464,9 @@ Behavior notes:
 `SAST/agent.py` is the current SAST engine.
 
 Core characteristics:
-- It uses the OpenAI Responses API with tool calling.
+- It uses a provider abstraction with tool calling for OpenAI, Claude, and DeepSeek.
+- OpenAI and DeepSeek use OpenAI-compatible chat completions.
+- Claude uses the Anthropic Messages API.
 - It loads the target project's `agents.md` and `README.md` into the system context when available.
 - It does not assume repository contents that have not been discovered through tool calls.
 - It focuses on exploitable vulnerabilities only, not style warnings.
@@ -440,10 +476,11 @@ Current tool set:
 - `search_codebase`
 - `read_file`
 
-Current model names:
-- `gpt-5-nano` for scanning
-- `gpt-5-nano` for fix generation
-- `gpt-5-nano` for verification
+Current default model names:
+- OpenAI: `gpt-5-nano` for scanning, fix generation, and verification
+- Claude: `claude-sonnet-4-5` for scanning, fix generation, and verification
+- DeepSeek: `deepseek-v4-flash` for scanning, fix generation, and verification
+- Each provider has independent scan, fix, and verification model fields in Configuration > AI Providers.
 
 Structured output models:
 - `Vulnerability`
@@ -460,6 +497,7 @@ Supporting components:
 - `ScanMemoryManager` tracks explored paths, tool counts, truncation, and compacts older tool output.
 - `ExplorationResult` wraps the raw investigation transcript and metadata.
 - `ScanCancelledError` is raised when the active scan is cancelled mid-run.
+- `SAST/llm/` contains provider adapters and the provider registry.
 
 Implementation note:
 - This is a repository-exploration agent, not a simple per-file loop. It decides what to inspect using bounded tool calls, then converts the gathered evidence into structured findings.

@@ -8,4 +8,5 @@ PyYAML
 GitPython
 Pygments
 openai
+anthropic
 pydantic

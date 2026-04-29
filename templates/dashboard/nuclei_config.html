@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
 
-{% block title %}Nuclei Configuration - VulnAssesor{% endblock %}
+{% block title %}Configuration - VulnAssesor{% endblock %}
 
 {% block content %}
-<div class="form-container">
+<div class="form-container" x-data="{ activeTab: '{{ active_tab|default:"nuclei" }}' }">
     <div class="form-header">
-        <h2>Nuclei CLI Configuration</h2>
+        <h2>Configuration</h2>
         <div style="display: flex; gap: 0.5rem;">
             <form method="post" action="{% url 'nuclei_update_templates' %}" style="display: inline;">
                 {% csrf_token %}
@@ -31,11 +31,21 @@
             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
             <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
         </svg>
-        <p>Configure how Nuclei runs vulnerability scans. Changes apply to all future scans.</p>
+        <p>Configure scanner execution and the AI provider used by future SAST scans.</p>
     </div>
 
-    <form method="post" class="config-form" x-data="configForm()">
+    <div class="config-tabs" role="tablist">
+        <button type="button" class="config-tab" :class="{ 'active': activeTab === 'nuclei' }" @click="activeTab = 'nuclei'">
+            Nuclei Scanner
+        </button>
+        <button type="button" class="config-tab" :class="{ 'active': activeTab === 'ai' }" @click="activeTab = 'ai'">
+            AI Providers
+        </button>
+    </div>
+
+    <form method="post" class="config-form" x-data="configForm()" x-show="activeTab === 'nuclei'">
         {% csrf_token %}
+        <input type="hidden" name="config_section" value="nuclei">
 
         <div class="config-section">
             <h3>
@@ -200,6 +210,203 @@
             </button>
         </div>
     </form>
+
+    <form method="post" class="config-form ai-config-form" x-show="activeTab === 'ai'">
+        {% csrf_token %}
+        <input type="hidden" name="config_section" value="ai">
+
+        <div class="config-section">
+            <h3>
+                <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M8 0a8 8 0 0 0-8 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.53 7.53 0 0 1 8 3.42c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.19 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8a8 8 0 0 0-8-8z"/>
+                </svg>
+                Provider
+            </h3>
+            <p class="section-description">Choose the backend used for SAST scan, fix generation, and verification.</p>
+
+            <div class="provider-grid">
+                <label class="provider-card {% if ai_config.provider == 'openai' %}selected{% endif %}">
+                    <input type="radio" name="provider" value="openai" {% if ai_config.provider == 'openai' %}checked{% endif %}>
+                    <span class="provider-name">OpenAI</span>
+                    <span class="provider-model">Scan: {{ ai_config.openai_scan_model }}</span>
+                    <span class="key-badge {% if ai_key_statuses.openai.configured %}configured{% else %}missing{% endif %}">
+                        {% if ai_key_statuses.openai.configured %}Configured{% else %}Missing{% endif %}
+                    </span>
+                    <small>{{ ai_key_statuses.openai.env_var }}</small>
+                </label>
+
+                <label class="provider-card {% if ai_config.provider == 'anthropic' %}selected{% endif %}">
+                    <input type="radio" name="provider" value="anthropic" {% if ai_config.provider == 'anthropic' %}checked{% endif %}>
+                    <span class="provider-name">Claude</span>
+                    <span class="provider-model">Scan: {{ ai_config.anthropic_scan_model }}</span>
+                    <span class="key-badge {% if ai_key_statuses.anthropic.configured %}configured{% else %}missing{% endif %}">
+                        {% if ai_key_statuses.anthropic.configured %}Configured{% else %}Missing{% endif %}
+                    </span>
+                    <small>{{ ai_key_statuses.anthropic.env_var }}</small>
+                </label>
+
+                <label class="provider-card {% if ai_config.provider == 'deepseek' %}selected{% endif %}">
+                    <input type="radio" name="provider" value="deepseek" {% if ai_config.provider == 'deepseek' %}checked{% endif %}>
+                    <span class="provider-name">DeepSeek</span>
+                    <span class="provider-model">Scan: {{ ai_config.deepseek_scan_model }}</span>
+                    <span class="key-badge {% if ai_key_statuses.deepseek.configured %}configured{% else %}missing{% endif %}">
+                        {% if ai_key_statuses.deepseek.configured %}Configured{% else %}Missing{% endif %}
+                    </span>
+                    <small>{{ ai_key_statuses.deepseek.env_var }}</small>
+                </label>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h3>
+                <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zM4.5 7.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1z"/>
+                </svg>
+                Provider Models
+            </h3>
+            <p class="section-description">Configure scan exploration, fix generation, and fix verification models independently for each provider.</p>
+
+            <div class="provider-model-settings">
+                <div class="provider-model-panel {% if ai_config.provider == 'openai' %}active-provider{% endif %}">
+                    <div class="provider-model-panel-header">
+                        <h4>OpenAI</h4>
+                        {% if ai_config.provider == 'openai' %}<span>Active</span>{% endif %}
+                    </div>
+                    <div class="config-grid">
+                        <div class="form-group">
+                            <label for="openai_scan_model">Scan Model</label>
+                            <input type="text" id="openai_scan_model" name="openai_scan_model" value="{{ ai_config.openai_scan_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="openai_fix_model">Fix Model</label>
+                            <input type="text" id="openai_fix_model" name="openai_fix_model" value="{{ ai_config.openai_fix_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="openai_verify_model">Verification Model</label>
+                            <input type="text" id="openai_verify_model" name="openai_verify_model" value="{{ ai_config.openai_verify_model }}" class="form-input">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-panel {% if ai_config.provider == 'anthropic' %}active-provider{% endif %}">
+                    <div class="provider-model-panel-header">
+                        <h4>Claude</h4>
+                        {% if ai_config.provider == 'anthropic' %}<span>Active</span>{% endif %}
+                    </div>
+                    <div class="config-grid">
+                        <div class="form-group">
+                            <label for="anthropic_scan_model">Scan Model</label>
+                            <input type="text" id="anthropic_scan_model" name="anthropic_scan_model" value="{{ ai_config.anthropic_scan_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="anthropic_fix_model">Fix Model</label>
+                            <input type="text" id="anthropic_fix_model" name="anthropic_fix_model" value="{{ ai_config.anthropic_fix_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="anthropic_verify_model">Verification Model</label>
+                            <input type="text" id="anthropic_verify_model" name="anthropic_verify_model" value="{{ ai_config.anthropic_verify_model }}" class="form-input">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="provider-model-panel {% if ai_config.provider == 'deepseek' %}active-provider{% endif %}">
+                    <div class="provider-model-panel-header">
+                        <h4>DeepSeek</h4>
+                        {% if ai_config.provider == 'deepseek' %}<span>Active</span>{% endif %}
+                    </div>
+                    <div class="config-grid">
+                        <div class="form-group">
+                            <label for="deepseek_scan_model">Scan Model</label>
+                            <input type="text" id="deepseek_scan_model" name="deepseek_scan_model" value="{{ ai_config.deepseek_scan_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="deepseek_fix_model">Fix Model</label>
+                            <input type="text" id="deepseek_fix_model" name="deepseek_fix_model" value="{{ ai_config.deepseek_fix_model }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label for="deepseek_verify_model">Verification Model</label>
+                            <input type="text" id="deepseek_verify_model" name="deepseek_verify_model" value="{{ ai_config.deepseek_verify_model }}" class="form-input">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h3>
+                <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M6 1a2 2 0 0 0-2 2v2H3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H6zm5 4H5V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2z"/>
+                </svg>
+                Environment Keys
+            </h3>
+            <p class="section-description">Only variable names are stored. API key values stay in the runtime environment.</p>
+            <div class="config-grid">
+                <div class="form-group">
+                    <label for="openai_api_key_env_var">OpenAI Key Variable</label>
+                    <input type="text" id="openai_api_key_env_var" name="openai_api_key_env_var" value="{{ ai_config.openai_api_key_env_var }}" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="anthropic_api_key_env_var">Claude Key Variable</label>
+                    <input type="text" id="anthropic_api_key_env_var" name="anthropic_api_key_env_var" value="{{ ai_config.anthropic_api_key_env_var }}" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="deepseek_api_key_env_var">DeepSeek Key Variable</label>
+                    <input type="text" id="deepseek_api_key_env_var" name="deepseek_api_key_env_var" value="{{ ai_config.deepseek_api_key_env_var }}" class="form-input">
+                </div>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h3>
+                <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v7A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 13.5 3h-11zM2 4.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 .5.5V6H2V4.5zm0 2.5h12v4.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5V7z"/>
+                </svg>
+                Advanced Provider Settings
+            </h3>
+            <p class="section-description">Override compatible endpoints and request limits when needed.</p>
+            <div class="config-grid">
+                <div class="form-group">
+                    <label for="openai_base_url">OpenAI Base URL</label>
+                    <input type="url" id="openai_base_url" name="openai_base_url" value="{{ ai_config.openai_base_url }}" placeholder="SDK default" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="anthropic_base_url">Claude Base URL</label>
+                    <input type="url" id="anthropic_base_url" name="anthropic_base_url" value="{{ ai_config.anthropic_base_url }}" placeholder="SDK default" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="deepseek_base_url">DeepSeek Base URL</label>
+                    <input type="url" id="deepseek_base_url" name="deepseek_base_url" value="{{ ai_config.deepseek_base_url }}" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="max_output_tokens">Max Output Tokens</label>
+                    <input type="number" id="max_output_tokens" name="max_output_tokens" value="{{ ai_config.max_output_tokens }}" min="512" max="200000" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="request_timeout">Request Timeout</label>
+                    <input type="number" id="request_timeout" name="request_timeout" value="{{ ai_config.request_timeout }}" min="10" max="600" class="form-input">
+                    <p class="form-help">Seconds before an AI provider request times out</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="ai-summary">
+            <strong>Active workflow:</strong>
+            Future SAST scans will use {{ ai_config.get_provider_display }} with
+            scan model <code>{{ ai_config.scan_model }}</code>,
+            fix model <code>{{ ai_config.fix_model }}</code>, and
+            verification model <code>{{ ai_config.verify_model }}</code>.
+        </div>
+
+        <div class="form-actions">
+            <a href="{% url 'dashboard' %}" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn">
+                <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="margin-right: 0.5rem;">
+                    <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+                </svg>
+                Save AI Settings
+            </button>
+        </div>
+    </form>
 </div>
 
 <script>
@@ -309,6 +516,32 @@ function configForm() {
     padding: 2rem;
 }
 
+.config-tabs {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+}
+
+.config-tab {
+    border: 0;
+    background: transparent;
+    color: #8b949e;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.65rem 1rem;
+}
+
+.config-tab:hover,
+.config-tab.active {
+    background: #21262d;
+    color: #c9d1d9;
+}
+
 .config-section {
     margin-bottom: 2.5rem;
     padding-bottom: 2rem;
@@ -397,6 +630,115 @@ function configForm() {
     color: #58a6ff;
     word-break: break-all;
     white-space: pre-wrap;
+}
+
+.provider-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.provider-card {
+    display: grid;
+    gap: 0.45rem;
+    min-height: 150px;
+    padding: 1rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.provider-card:hover,
+.provider-card:has(input:checked),
+.provider-card.selected {
+    border-color: #58a6ff;
+    background: rgba(88, 166, 255, 0.08);
+}
+
+.provider-card input {
+    width: 18px;
+    height: 18px;
+}
+
+.provider-name {
+    color: #c9d1d9;
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.provider-model,
+.provider-card small {
+    color: #8b949e;
+    font-size: 0.85rem;
+}
+
+.key-badge {
+    width: fit-content;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.key-badge.configured {
+    background: rgba(63, 185, 80, 0.12);
+    color: #3fb950;
+}
+
+.key-badge.missing {
+    background: rgba(248, 81, 73, 0.12);
+    color: #f85149;
+}
+
+.provider-model-settings {
+    display: grid;
+    gap: 1.25rem;
+    margin-top: 1.5rem;
+}
+
+.provider-model-panel {
+    padding: 1rem;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+}
+
+.provider-model-panel.active-provider {
+    border-color: #58a6ff;
+    background: rgba(88, 166, 255, 0.06);
+}
+
+.provider-model-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.provider-model-panel-header h4 {
+    margin: 0;
+    color: #c9d1d9;
+    font-size: 1rem;
+}
+
+.provider-model-panel-header span {
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    background: rgba(88, 166, 255, 0.12);
+    color: #58a6ff;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.ai-summary {
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    background: rgba(63, 185, 80, 0.08);
+    border: 1px solid rgba(63, 185, 80, 0.35);
+    border-radius: 6px;
+    color: #c9d1d9;
 }
 </style>
 {% endblock %}

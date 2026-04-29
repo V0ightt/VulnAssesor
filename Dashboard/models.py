@@ -1,3 +1,5 @@
+import os
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -167,6 +169,219 @@ class NucleiConfig(models.Model):
             command.extend(custom_args_list)
 
         return command
+
+
+class AIConfig(models.Model):
+    """
+    Stores site-wide AI provider settings for SAST scans.
+    API key values stay in environment variables; this model stores only
+    provider selection, model names, base URLs, and env var names.
+    """
+    PROVIDER_OPENAI = 'openai'
+    PROVIDER_ANTHROPIC = 'anthropic'
+    PROVIDER_DEEPSEEK = 'deepseek'
+
+    PROVIDER_CHOICES = [
+        (PROVIDER_OPENAI, 'OpenAI'),
+        (PROVIDER_ANTHROPIC, 'Claude'),
+        (PROVIDER_DEEPSEEK, 'DeepSeek'),
+    ]
+
+    provider = models.CharField(
+        max_length=20,
+        choices=PROVIDER_CHOICES,
+        default=PROVIDER_OPENAI,
+        help_text="AI provider used for SAST scans, fix generation, and verification."
+    )
+    openai_scan_model = models.CharField(max_length=120, default='gpt-5-nano')
+    openai_fix_model = models.CharField(max_length=120, default='gpt-5-nano')
+    openai_verify_model = models.CharField(max_length=120, default='gpt-5-nano')
+    anthropic_scan_model = models.CharField(max_length=120, default='claude-sonnet-4-5')
+    anthropic_fix_model = models.CharField(max_length=120, default='claude-sonnet-4-5')
+    anthropic_verify_model = models.CharField(max_length=120, default='claude-sonnet-4-5')
+    deepseek_scan_model = models.CharField(max_length=120, default='deepseek-v4-flash')
+    deepseek_fix_model = models.CharField(max_length=120, default='deepseek-v4-flash')
+    deepseek_verify_model = models.CharField(max_length=120, default='deepseek-v4-flash')
+
+    openai_api_key_env_var = models.CharField(max_length=120, default='OPENAI_API_KEY')
+    anthropic_api_key_env_var = models.CharField(max_length=120, default='ANTHROPIC_API_KEY')
+    deepseek_api_key_env_var = models.CharField(max_length=120, default='DEEPSEEK_API_KEY')
+
+    openai_base_url = models.URLField(blank=True, default='')
+    anthropic_base_url = models.URLField(blank=True, default='')
+    deepseek_base_url = models.URLField(default='https://api.deepseek.com')
+
+    max_output_tokens = models.IntegerField(
+        default=4096,
+        validators=[MinValueValidator(512), MaxValueValidator(200000)],
+        help_text="Maximum tokens returned by AI providers where supported."
+    )
+    request_timeout = models.IntegerField(
+        default=120,
+        validators=[MinValueValidator(10), MaxValueValidator(600)],
+        help_text="Provider request timeout in seconds."
+    )
+
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ai_config_updates'
+    )
+
+    class Meta:
+        verbose_name = "AI Configuration"
+        verbose_name_plural = "AI Configuration"
+
+    def __str__(self):
+        return f"AI Configuration ({self.get_provider_display()})"
+
+    def save(self, *args, **kwargs):
+        if not self.pk and AIConfig.objects.exists():
+            existing = AIConfig.objects.first()
+            self.pk = existing.pk
+        self._apply_provider_model_defaults()
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_config(cls):
+        config, created = cls.objects.get_or_create(pk=1)
+        return config
+
+    @classmethod
+    def provider_defaults(cls):
+        return {
+            cls.PROVIDER_OPENAI: {
+                'scan_model': 'gpt-5-nano',
+                'fix_model': 'gpt-5-nano',
+                'verify_model': 'gpt-5-nano',
+            },
+            cls.PROVIDER_ANTHROPIC: {
+                'scan_model': 'claude-sonnet-4-5',
+                'fix_model': 'claude-sonnet-4-5',
+                'verify_model': 'claude-sonnet-4-5',
+            },
+            cls.PROVIDER_DEEPSEEK: {
+                'scan_model': 'deepseek-v4-flash',
+                'fix_model': 'deepseek-v4-flash',
+                'verify_model': 'deepseek-v4-flash',
+            },
+        }
+
+    def _apply_provider_model_defaults(self):
+        for provider, defaults in self.provider_defaults().items():
+            prefix = self._provider_field_prefix(provider)
+            scan_field = f'{prefix}_scan_model'
+            fix_field = f'{prefix}_fix_model'
+            verify_field = f'{prefix}_verify_model'
+            if not getattr(self, scan_field):
+                setattr(self, scan_field, defaults['scan_model'])
+            if not getattr(self, fix_field):
+                setattr(self, fix_field, defaults['fix_model'])
+            if not getattr(self, verify_field):
+                setattr(self, verify_field, defaults['verify_model'])
+
+    @classmethod
+    def _provider_field_prefix(cls, provider):
+        return {
+            cls.PROVIDER_OPENAI: 'openai',
+            cls.PROVIDER_ANTHROPIC: 'anthropic',
+            cls.PROVIDER_DEEPSEEK: 'deepseek',
+        }[provider]
+
+    def models_for_provider(self, provider=None):
+        selected_provider = provider or self.provider
+        prefix = self._provider_field_prefix(selected_provider)
+        defaults = self.provider_defaults()[selected_provider]
+        return {
+            'scan_model': getattr(self, f'{prefix}_scan_model') or defaults['scan_model'],
+            'fix_model': getattr(self, f'{prefix}_fix_model') or defaults['fix_model'],
+            'verify_model': getattr(self, f'{prefix}_verify_model') or defaults['verify_model'],
+        }
+
+    @property
+    def scan_model(self):
+        return self.models_for_provider()['scan_model']
+
+    @scan_model.setter
+    def scan_model(self, value):
+        setattr(self, f'{self._provider_field_prefix(self.provider)}_scan_model', value)
+
+    @property
+    def fix_model(self):
+        return self.models_for_provider()['fix_model']
+
+    @fix_model.setter
+    def fix_model(self, value):
+        setattr(self, f'{self._provider_field_prefix(self.provider)}_fix_model', value)
+
+    @property
+    def verify_model(self):
+        return self.models_for_provider()['verify_model']
+
+    @verify_model.setter
+    def verify_model(self, value):
+        setattr(self, f'{self._provider_field_prefix(self.provider)}_verify_model', value)
+
+    def selected_api_key_env_var(self):
+        return {
+            self.PROVIDER_OPENAI: self.openai_api_key_env_var,
+            self.PROVIDER_ANTHROPIC: self.anthropic_api_key_env_var,
+            self.PROVIDER_DEEPSEEK: self.deepseek_api_key_env_var,
+        }[self.provider]
+
+    def selected_base_url(self):
+        return {
+            self.PROVIDER_OPENAI: self.openai_base_url,
+            self.PROVIDER_ANTHROPIC: self.anthropic_base_url,
+            self.PROVIDER_DEEPSEEK: self.deepseek_base_url,
+        }[self.provider]
+
+    def get_api_key(self):
+        env_var = self.selected_api_key_env_var()
+        return os.environ.get(env_var, '')
+
+    def require_api_key(self):
+        env_var = self.selected_api_key_env_var()
+        api_key = os.environ.get(env_var)
+        if not api_key:
+            raise ValueError(f"{env_var} environment variable is not set.")
+        return api_key
+
+    def key_statuses(self):
+        return {
+            self.PROVIDER_OPENAI: {
+                'label': 'OpenAI',
+                'env_var': self.openai_api_key_env_var,
+                'configured': bool(os.environ.get(self.openai_api_key_env_var)),
+            },
+            self.PROVIDER_ANTHROPIC: {
+                'label': 'Claude',
+                'env_var': self.anthropic_api_key_env_var,
+                'configured': bool(os.environ.get(self.anthropic_api_key_env_var)),
+            },
+            self.PROVIDER_DEEPSEEK: {
+                'label': 'DeepSeek',
+                'env_var': self.deepseek_api_key_env_var,
+                'configured': bool(os.environ.get(self.deepseek_api_key_env_var)),
+            },
+        }
+
+    def selected_provider_settings(self):
+        selected_models = self.models_for_provider()
+        return {
+            'provider': self.provider,
+            'provider_label': self.get_provider_display(),
+            'api_key_env_var': self.selected_api_key_env_var(),
+            'base_url': self.selected_base_url(),
+            'scan_model': selected_models['scan_model'],
+            'fix_model': selected_models['fix_model'],
+            'verify_model': selected_models['verify_model'],
+            'max_output_tokens': self.max_output_tokens,
+            'request_timeout': self.request_timeout,
+        }
 
 
 class NucleiTemplate(models.Model):

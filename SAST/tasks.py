@@ -69,7 +69,12 @@ def run_sast_scan(scan_job_id):
         except ValueError as e:
             logger.error(f"SAST Agent initialization failed: {e}")
             scan_job.status = 'FAILED'
-            scan_job.save()
+            scan_job.agent_run_metadata = {
+                'stop_reason': 'provider_initialization_failed',
+                'error': str(e),
+            }
+            scan_job.completed_at = timezone.now()
+            scan_job.save(update_fields=['status', 'agent_run_metadata', 'completed_at'])
             return f"Scan failed: {e}"
 
         findings = agent.scan_project()

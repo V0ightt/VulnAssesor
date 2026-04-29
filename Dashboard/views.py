@@ -8,7 +8,7 @@ from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from .tasks import simple_test_task, run_specialist_scan
-from .models import Website, NucleiTemplate, ScanJob, NucleiConfig, ScanResult
+from .models import Website, NucleiTemplate, ScanJob, NucleiConfig, ScanResult, AIConfig
 import subprocess
 import json
 from VulnAssesor.celery import app as celery_app
@@ -579,23 +579,58 @@ def scan_results_view(request, scan_pk):
 @login_required
 def nuclei_config_view(request):
     """
-    View and edit Nuclei CLI configuration (admin/staff only).
+    View and edit scanner and AI provider configuration.
     """
     # if not request.user.is_staff:
     #     messages.error(request, 'You must be a staff member to access Nuclei configuration.')
     #     return redirect('dashboard')
 
     config = NucleiConfig.get_config()
+    ai_config = AIConfig.get_config()
+    active_tab = request.GET.get('tab', 'nuclei')
 
     if request.method == 'POST':
-        # Update configuration
         try:
-            # Helper function to safely convert to int
             def safe_int(value, default):
                 try:
                     return int(value)
                 except (ValueError, TypeError):
                     return default
+
+            if request.POST.get('config_section') == 'ai':
+                provider = request.POST.get('provider', ai_config.provider)
+                valid_providers = {choice[0] for choice in AIConfig.PROVIDER_CHOICES}
+                if provider not in valid_providers:
+                    raise ValueError('Invalid AI provider selected.')
+
+                ai_config.provider = provider
+                provider_fields = {
+                    'openai': ('openai_scan_model', 'openai_fix_model', 'openai_verify_model'),
+                    'anthropic': ('anthropic_scan_model', 'anthropic_fix_model', 'anthropic_verify_model'),
+                    'deepseek': ('deepseek_scan_model', 'deepseek_fix_model', 'deepseek_verify_model'),
+                }
+                for provider_name, fields in provider_fields.items():
+                    defaults = AIConfig.provider_defaults()[provider_name]
+                    default_values = (
+                        defaults['scan_model'],
+                        defaults['fix_model'],
+                        defaults['verify_model'],
+                    )
+                    for field, default_value in zip(fields, default_values):
+                        setattr(ai_config, field, request.POST.get(field, '').strip() or default_value)
+                ai_config.openai_api_key_env_var = request.POST.get('openai_api_key_env_var', 'OPENAI_API_KEY').strip() or 'OPENAI_API_KEY'
+                ai_config.anthropic_api_key_env_var = request.POST.get('anthropic_api_key_env_var', 'ANTHROPIC_API_KEY').strip() or 'ANTHROPIC_API_KEY'
+                ai_config.deepseek_api_key_env_var = request.POST.get('deepseek_api_key_env_var', 'DEEPSEEK_API_KEY').strip() or 'DEEPSEEK_API_KEY'
+                ai_config.openai_base_url = request.POST.get('openai_base_url', '').strip()
+                ai_config.anthropic_base_url = request.POST.get('anthropic_base_url', '').strip()
+                ai_config.deepseek_base_url = request.POST.get('deepseek_base_url', 'https://api.deepseek.com').strip() or 'https://api.deepseek.com'
+                ai_config.max_output_tokens = safe_int(request.POST.get('max_output_tokens'), ai_config.max_output_tokens)
+                ai_config.request_timeout = safe_int(request.POST.get('request_timeout'), ai_config.request_timeout)
+                ai_config.updated_by = request.user
+                ai_config.save()
+
+                messages.success(request, 'AI provider configuration updated successfully!')
+                return redirect('/nuclei/config/?tab=ai')
 
             config.timeout = safe_int(request.POST.get('timeout'), config.timeout)
             config.rate_limit = safe_int(request.POST.get('rate_limit'), config.rate_limit)
@@ -624,6 +659,9 @@ def nuclei_config_view(request):
 
     return render(request, 'dashboard/nuclei_config.html', {
         'config': config,
+        'ai_config': ai_config,
+        'ai_key_statuses': ai_config.key_statuses(),
+        'active_tab': active_tab,
         'example_command': ' '.join(example_command),
     })
 

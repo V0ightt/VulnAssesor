@@ -1,13 +1,13 @@
 # VulnAssesor
 
-VulnAssesor is a Django 5.2 security assessment workspace for websites and source repositories. It combines Nuclei-powered DAST with an OpenAI-backed SAST agent, all rendered through Django templates with HTMX and Alpine.js.
+VulnAssesor is a Django 5.2 security assessment workspace for websites and source repositories. It combines Nuclei-powered DAST with a configurable AI-backed SAST agent, all rendered through Django templates with HTMX and Alpine.js.
 
 ## What You Can Do
 - Register and authenticate users.
 - Add websites and run live DAST scans with Nuclei.
 - Create, edit, and delete your own Nuclei templates.
 - Load bundled templates from `nuclei-templates/`.
-- Configure Nuclei behavior from the web UI.
+- Configure Nuclei behavior and provider-specific SAST AI model settings from the web UI.
 - Create SAST projects from Git URLs or ZIP uploads.
 - Watch real-time scan progress and review findings.
 - Read AI explanations and proposed fixes for SAST findings.
@@ -22,12 +22,12 @@ VulnAssesor is a Django 5.2 security assessment workspace for websites and sourc
 - Redis
 - PostgreSQL or SQLite
 - Nuclei 3.4.10
-- OpenAI, GitPython, Pygments, and PyYAML
+- OpenAI-compatible APIs, Anthropic Claude, GitPython, Pygments, and PyYAML
 - Docker and Docker Compose
 
 ## Quick Start
 ### Docker
-1. Set `OPENAI_API_KEY` in your shell or `.env` file.
+1. Set the API key for the provider you plan to use in your shell or `.env` file: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
 2. Run `docker compose up --build` or `docker-compose up --build`.
 3. Open `http://localhost:8000`.
 
@@ -40,7 +40,7 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 3. Choose a database backend:
    - `USE_SQLITE=True` uses `db.sqlite3`.
    - Otherwise configure `POSTGRES_*` for PostgreSQL.
-4. Export `OPENAI_API_KEY`.
+4. Export the API key for your selected provider.
 5. Run:
    ```bash
    python manage.py migrate
@@ -51,7 +51,9 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 6. Open `http://localhost:8000`.
 
 ## Environment Variables
-- `OPENAI_API_KEY` - required for SAST scans.
+- `OPENAI_API_KEY` - required when the AI provider is OpenAI.
+- `ANTHROPIC_API_KEY` - required when the AI provider is Claude.
+- `DEEPSEEK_API_KEY` - required when the AI provider is DeepSeek.
 - `USE_SQLITE=True` - switch to SQLite.
 - `DJANGO_ALLOWED_HOSTS` - comma-separated host list.
 - `POSTGRES_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` - PostgreSQL settings.
@@ -73,8 +75,9 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 4. Start a scan from the project page.
 5. Any pending or running scan for that project is cancelled before a new one is queued.
 6. The agent explores the repository through tool calls instead of loading the whole tree into memory.
-7. Findings store file path, line number, severity, description, code snippet, AI explanation, and a proposed fix.
-8. The project page shows scan status, scan history, and read-only workspace browsing endpoints.
+7. The selected AI provider is read from Configuration > AI Providers. OpenAI, Claude, and DeepSeek each have independent scan, fix, and verification model settings.
+8. Findings store file path, line number, severity, description, code snippet, AI explanation, and a proposed fix.
+9. The project page shows scan status, scan history, and read-only workspace browsing endpoints.
 
 ## Useful Commands
 - `python manage.py load_templates` - import YAML templates from `nuclei-templates/`.
