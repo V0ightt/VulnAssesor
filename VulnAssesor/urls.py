@@ -27,8 +27,11 @@ urlpatterns = [
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),
 
-    # Dashboard and Website CRUD URLs
+    # Main Dashboard (Command Center)
     path('', views.dashboard_view, name='dashboard'),
+
+    # DAST Page (formerly Dashboard)
+    path('dast/', views.dast_view, name='dast'),
     path('website/add/', views.website_add_view, name='website_add'),
     path('website/<int:pk>/edit/', views.website_edit_view, name='website_edit'),
     path('website/<int:pk>/delete/', views.website_delete_view, name='website_delete'),

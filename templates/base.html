@@ -63,6 +63,14 @@
                     <span x-show="sidebarOpen" class="sidebar-text">Dashboard</span>
                 </a>
 
+                <a href="{% url 'dast' %}" class="sidebar-link {% if request.resolver_match.url_name == 'dast' %}active{% endif %}">
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
+                        <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+                    </svg>
+                    <span x-show="sidebarOpen" class="sidebar-text">DAST</span>
+                </a>
+
+
                 <a href="{% url 'template_list' %}" class="sidebar-link {% if request.resolver_match.url_name == 'template_list' %}active{% endif %}">
                     <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
                         <path d="M5 4a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zM5 8a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1H5z"/>
@@ -80,7 +88,7 @@
 
                 <!-- Projects Dropdown -->
                 <div x-data="{ expanded: {% if 'projects' in request.path %}true{% else %}false{% endif %} }">
-                    <a href="#" @click.prevent="expanded = !expanded" class="sidebar-link" :class="{ 'active': 'projects' in request.path }">
+                    <a href="#" @click.prevent="expanded = !expanded" class="sidebar-link {% if 'projects' in request.path %}active{% endif %}">
                         <div style="display: flex; align-items: center; flex: 1;">
                             <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
                                 <path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31zM2.19 4a1 1 0 0 0-.996 1.09l.637 7a1 1 0 0 0 .995.91h10.348a1 1 0 0 0 .995-.91l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/>
@@ -93,7 +101,7 @@
                     </a>
 
                     <!-- Project List in Sidebar -->
-                    <div x-show="sidebarOpen && expanded" x-collapse class="sidebar-projects" style="background-color: transparent; border-left: 2px solid #30363d; margin-left: 20px;">
+                    <div x-show="sidebarOpen && expanded" class="sidebar-projects" style="background-color: transparent; border-left: 2px solid #30363d; margin-left: 20px;">
                         <a href="{% url 'project_list' %}" class="sidebar-link" style="padding-left: 20px; font-size: 0.9em; color: #8b949e;">
                             <span class="sidebar-text">All Projects</span>
                         </a>
@@ -181,6 +189,13 @@
                         <path fill-rule="evenodd" d="M0 10a8 8 0 1 1 15.547 2.661c-.442 1.253-1.845 1.602-2.932 1.25C11.309 13.488 9.475 13 8 13c-1.474 0-3.31.488-4.615.911-1.087.352-2.49.003-2.932-1.25A7.988 7.988 0 0 1 0 10zm8-7a7 7 0 0 0-6.603 9.329c.203.575.923.876 1.68.63C4.397 12.533 6.358 12 8 12s3.604.532 4.923.96c.757.245 1.477-.056 1.68-.631A7 7 0 0 0 8 3z"/>
                     </svg>
                     <span class="sidebar-text">Dashboard</span>
+                </a>
+
+                <a href="{% url 'dast' %}" class="sidebar-link {% if request.resolver_match.url_name == 'dast' %}active{% endif %}">
+                    <svg width="18" height="18" fill="currentColor" viewBox="0 0 16 16" class="sidebar-icon">
+                        <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+                    </svg>
+                    <span class="sidebar-text">DAST</span>
                 </a>
 
                 <a href="{% url 'template_list' %}" class="sidebar-link {% if request.resolver_match.url_name == 'template_list' %}active{% endif %}">

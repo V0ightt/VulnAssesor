@@ -1,0 +1,356 @@
+{% extends 'base.html' %}
+{% block title %}Command Center - VulnAssesor{% endblock %}
+
+{% block content %}
+<div class="cc-wrapper" x-data="commandCenter()" x-init="init()">
+
+<!-- Animated Background Grid -->
+<div class="cc-grid-bg"></div>
+
+<!-- Header -->
+<div class="cc-header">
+    <div>
+        <h1 class="cc-title">
+            <span class="cc-title-icon">
+                <svg width="28" height="28" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM4.5 7.5a.5.5 0 0 0 0 1h5.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3a.5.5 0 0 0 0-.708l-3-3a.5.5 0 1 0-.708.708L10.293 7.5H4.5z"/></svg>
+            </span>
+            Command Center
+        </h1>
+        <p class="cc-subtitle">Real-time security intelligence &mdash; SAST &amp; DAST unified view</p>
+    </div>
+    <div class="cc-header-right">
+        <div class="cc-live-badge" :class="{ 'cc-live-active': activeTotal > 0 }">
+            <span class="cc-live-dot"></span>
+            <span x-text="activeTotal > 0 ? activeTotal + ' SCAN' + (activeTotal > 1 ? 'S' : '') + ' ACTIVE' : 'ALL CLEAR'"></span>
+        </div>
+    </div>
+</div>
+
+<!-- KPI Row -->
+<div class="cc-kpi-row">
+    <div class="cc-kpi-card cc-kpi-blue">
+        <div class="cc-kpi-icon"><svg width="22" height="22" fill="currentColor" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31z"/></svg></div>
+        <div class="cc-kpi-data">
+            <span class="cc-kpi-value" x-data="{v:0}" x-init="animateCount($el, {{ total_projects }})">0</span>
+            <span class="cc-kpi-label">Projects</span>
+        </div>
+        <div class="cc-kpi-sub">{{ projects_ready }} ready &bull; {{ projects_pending }} ingesting</div>
+    </div>
+    <div class="cc-kpi-card cc-kpi-cyan">
+        <div class="cc-kpi-icon"><svg width="22" height="22" fill="currentColor" viewBox="0 0 16 16"><path d="M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-7a7 7 0 0 0-5.468 11.37C3.242 11.226 4.805 10 8 10s4.757 1.225 5.468 2.37A7 7 0 0 0 8 1z"/><path d="M8 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></svg></div>
+        <div class="cc-kpi-data">
+            <span class="cc-kpi-value" x-data="{v:0}" x-init="animateCount($el, {{ total_websites }})">0</span>
+            <span class="cc-kpi-label">Websites</span>
+        </div>
+        <div class="cc-kpi-sub">DAST targets registered</div>
+    </div>
+    <div class="cc-kpi-card cc-kpi-purple">
+        <div class="cc-kpi-icon"><svg width="22" height="22" fill="currentColor" viewBox="0 0 16 16"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.399l-.438.033-.088-.416 2.042-.217.962.012z"/><path d="M8 5.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z"/></svg></div>
+        <div class="cc-kpi-data">
+            <span class="cc-kpi-value" x-data="{v:0}" x-init="animateCount($el, {{ total_sast_scans|add:total_dast_scans }})">0</span>
+            <span class="cc-kpi-label">Total Scans</span>
+        </div>
+        <div class="cc-kpi-sub">{{ total_sast_scans }} SAST &bull; {{ total_dast_scans }} DAST</div>
+    </div>
+    <div class="cc-kpi-card cc-kpi-green">
+        <div class="cc-kpi-icon"><svg width="22" height="22" fill="currentColor" viewBox="0 0 16 16"><path d="M2.5 8a5.5 5.5 0 0 1 8.25-4.764.5.5 0 0 0 .5-.866A6.5 6.5 0 1 0 14.5 8a.5.5 0 0 0-1 0 5.5 5.5 0 1 1-11 0z"/><path d="M15.354 3.354a.5.5 0 0 0-.708-.708L8 9.293 5.354 6.646a.5.5 0 1 0-.708.708l3 3a.5.5 0 0 0 .708 0l7-7z"/></svg></div>
+        <div class="cc-kpi-data">
+            <span class="cc-kpi-value" x-data="{v:0}" x-init="animateCount($el, {{ total_fixes }})">0</span>
+            <span class="cc-kpi-label">AI Fixes</span>
+        </div>
+        <div class="cc-kpi-sub">{{ fixes_accepted }} accepted &bull; {{ fixes_pending }} pending</div>
+    </div>
+</div>
+
+<!-- Active Scans Banner -->
+{% if active_total > 0 %}
+<div class="cc-active-banner" id="active-scans-banner">
+    <div class="cc-active-pulse"></div>
+    <div class="cc-active-content">
+        <strong>🔬 Live Scans Running</strong>
+        <div class="cc-active-items" x-data='{ scans: {{ active_scans_json|safe }} }'>
+            <template x-for="scan in scans" :key="scan.id">
+                <div class="cc-active-item">
+                    <span class="cc-active-type" :class="'cc-type-' + scan.type.toLowerCase()" x-text="scan.type"></span>
+                    <span class="cc-active-name" x-text="scan.name"></span>
+                    <span class="cc-active-status">
+                        <span class="cc-scan-spinner"></span>
+                        <span x-text="scan.status"></span>
+                    </span>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Main Grid -->
+<div class="cc-grid">
+
+    <!-- Severity Breakdown -->
+    <div class="cc-panel cc-panel-severity">
+        <div class="cc-panel-header">
+            <h3>Vulnerability Severity</h3>
+            <span class="cc-panel-badge">{{ total_sast_findings|add:total_dast_findings }} total</span>
+        </div>
+        <div class="cc-severity-bars" x-data='severityChart({{ severity_json|safe }})'>
+            <div class="cc-sev-row">
+                <span class="cc-sev-label cc-sev-critical">CRITICAL</span>
+                <div class="cc-sev-bar-wrap"><div class="cc-sev-bar cc-bar-critical" :style="'width:' + pct('critical') + '%'"></div></div>
+                <span class="cc-sev-count" x-text="data.critical">0</span>
+            </div>
+            <div class="cc-sev-row">
+                <span class="cc-sev-label cc-sev-high">HIGH</span>
+                <div class="cc-sev-bar-wrap"><div class="cc-sev-bar cc-bar-high" :style="'width:' + pct('high') + '%'"></div></div>
+                <span class="cc-sev-count" x-text="data.high">0</span>
+            </div>
+            <div class="cc-sev-row">
+                <span class="cc-sev-label cc-sev-medium">MEDIUM</span>
+                <div class="cc-sev-bar-wrap"><div class="cc-sev-bar cc-bar-medium" :style="'width:' + pct('medium') + '%'"></div></div>
+                <span class="cc-sev-count" x-text="data.medium">0</span>
+            </div>
+            <div class="cc-sev-row">
+                <span class="cc-sev-label cc-sev-low">LOW</span>
+                <div class="cc-sev-bar-wrap"><div class="cc-sev-bar cc-bar-low" :style="'width:' + pct('low') + '%'"></div></div>
+                <span class="cc-sev-count" x-text="data.low">0</span>
+            </div>
+            <div class="cc-sev-row">
+                <span class="cc-sev-label cc-sev-info">INFO</span>
+                <div class="cc-sev-bar-wrap"><div class="cc-sev-bar cc-bar-info" :style="'width:' + pct('info') + '%'"></div></div>
+                <span class="cc-sev-count" x-text="data.info">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- SAST vs DAST Split -->
+    <div class="cc-panel cc-panel-split">
+        <div class="cc-panel-header"><h3>SAST vs DAST</h3></div>
+        <div class="cc-split-grid">
+            <div class="cc-split-card cc-split-sast">
+                <!-- <div class="cc-split-icon">🔍</div> -->
+                <div class="cc-split-title">SAST</div>
+                <div class="cc-split-big">{{ total_sast_findings }}</div>
+                <div class="cc-split-label">findings</div>
+                <div class="cc-split-details">
+                    <span class="cc-sd cc-sd-crit">{{ sast_critical }} crit</span>
+                    <span class="cc-sd cc-sd-high">{{ sast_high }} high</span>
+                    <span class="cc-sd cc-sd-med">{{ sast_medium }} med</span>
+                </div>
+                <div class="cc-split-scans">{{ completed_sast_scans }} completed &bull; {{ active_sast_count }} active</div>
+            </div>
+            <div class="cc-split-vs">VS</div>
+            <div class="cc-split-card cc-split-dast">
+                <!-- <div class="cc-split-icon">⚡</div> -->
+                <div class="cc-split-title">DAST</div>
+                <div class="cc-split-big">{{ total_dast_findings }}</div>
+                <div class="cc-split-label">findings</div>
+                <div class="cc-split-details">
+                    <span class="cc-sd cc-sd-crit">{{ dast_critical }} crit</span>
+                    <span class="cc-sd cc-sd-high">{{ dast_high }} high</span>
+                    <span class="cc-sd cc-sd-med">{{ dast_medium }} med</span>
+                </div>
+                <div class="cc-split-scans">{{ completed_dast_scans }} completed &bull; {{ active_dast_count }} active</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Agent Intelligence -->
+    <div class="cc-panel cc-panel-agent">
+        <div class="cc-panel-header">
+            <h3>AI Agent Intelligence</h3>
+        </div>
+        <div class="cc-agent-stats">
+            <div class="cc-agent-stat">
+                <div class="cc-agent-val" x-data="{v:0}" x-init="animateCount($el, {{ total_tool_calls }})">0</div>
+                <div class="cc-agent-label">Tool Calls</div>
+            </div>
+            <div class="cc-agent-stat">
+                <div class="cc-agent-val" x-data="{v:0}" x-init="animateCount($el, {{ total_fixes }})">0</div>
+                <div class="cc-agent-label">Fixes Generated</div>
+            </div>
+            <div class="cc-agent-stat">
+                <div class="cc-agent-val" x-data="{v:0}" x-init="animateCount($el, {{ total_compactions }})">0</div>
+                <div class="cc-agent-label">Compactions</div>
+            </div>
+        </div>
+        <div class="cc-agent-tools" x-data='{ tools: {{ tool_counts_json|safe }} }'>
+            <div class="cc-agent-tools-title">Tool Usage Breakdown</div>
+            <template x-for="(count, name) in tools" :key="name">
+                <div class="cc-tool-row">
+                    <span class="cc-tool-name" x-text="name"></span>
+                    <div class="cc-tool-bar-wrap">
+                        <div class="cc-tool-bar" :style="'width:' + Math.min(100, (count / Math.max(1, Object.values(tools).reduce((a,b)=>Math.max(a,b),1))) * 100) + '%'"></div>
+                    </div>
+                    <span class="cc-tool-count" x-text="count"></span>
+                </div>
+            </template>
+            <template x-if="Object.keys(tools).length === 0">
+                <div class="cc-empty-msg">No scans run yet &mdash; AI agent data will appear here</div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Fix Status -->
+    <div class="cc-panel cc-panel-fixes">
+        <div class="cc-panel-header"><h3>🔧 Fix Pipeline</h3></div>
+        <div class="cc-fix-ring" x-data="fixRing({{ fixes_pending }}, {{ fixes_accepted }}, {{ fixes_rejected }})">
+            <svg viewBox="0 0 120 120" class="cc-ring-svg">
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#21262d" stroke-width="10"/>
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#d29922" stroke-width="10"
+                    :stroke-dasharray="pendingDash" stroke-dashoffset="0" stroke-linecap="round" class="cc-ring-anim"/>
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#3fb950" stroke-width="10"
+                    :stroke-dasharray="acceptedDash" :stroke-dashoffset="'-' + pendingLen" stroke-linecap="round" class="cc-ring-anim"/>
+                <circle cx="60" cy="60" r="50" fill="none" stroke="#f85149" stroke-width="10"
+                    :stroke-dasharray="rejectedDash" :stroke-dashoffset="'-' + (pendingLen + acceptedLen)" stroke-linecap="round" class="cc-ring-anim"/>
+                <text x="60" y="55" text-anchor="middle" fill="#c9d1d9" font-size="22" font-weight="700" x-text="total">0</text>
+                <text x="60" y="72" text-anchor="middle" fill="#8b949e" font-size="10">FIXES</text>
+            </svg>
+        </div>
+        <div class="cc-fix-legend">
+            <span class="cc-fix-leg"><span class="cc-dot cc-dot-pending"></span> {{ fixes_pending }} Pending</span>
+            <span class="cc-fix-leg"><span class="cc-dot cc-dot-accepted"></span> {{ fixes_accepted }} Accepted</span>
+            <span class="cc-fix-leg"><span class="cc-dot cc-dot-rejected"></span> {{ fixes_rejected }} Rejected</span>
+        </div>
+    </div>
+
+</div>
+
+<!-- Projects Table -->
+<div class="cc-panel cc-panel-wide cc-panel-table">
+    <div class="cc-panel-header">
+        <h3>📊 Project Overview</h3>
+        <a href="{% url 'project_list' %}" class="btn btn-outline" style="font-size:0.8rem;padding:0.4rem 0.8rem;">View All Projects</a>
+    </div>
+    {% if project_summaries %}
+    <div class="cc-table-wrap">
+        <table class="cc-table">
+            <thead>
+                <tr>
+                    <th>Project</th><th>Status</th><th>Scans</th><th>Findings</th><th>Critical</th><th>High</th><th>Last Scan</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in project_summaries %}
+                <tr class="cc-table-row" onclick="window.location='{% url 'project_detail' p.id %}'">
+                    <td><strong>{{ p.name }}</strong></td>
+                    <td><span class="cc-status-pill cc-status-{{ p.status|lower }}">{{ p.status }}</span></td>
+                    <td>{{ p.total_scans }}</td>
+                    <td>{{ p.total_findings }}</td>
+                    <td>{% if p.critical > 0 %}<span class="cc-hot">{{ p.critical }}</span>{% else %}0{% endif %}</td>
+                    <td>{% if p.high > 0 %}<span class="cc-warm">{{ p.high }}</span>{% else %}0{% endif %}</td>
+                    <td>{% if p.last_scan %}{{ p.last_scan|timesince }} ago{% else %}<span class="cc-muted">Never</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="cc-empty-state">
+        <p>No projects yet. <a href="{% url 'project_create' %}">Create your first project</a> to start scanning.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Recent Activity -->
+<div class="cc-grid cc-grid-2">
+    <div class="cc-panel">
+        <div class="cc-panel-header"><h3>🔍 Recent SAST Scans</h3></div>
+        {% if recent_sast %}
+        <div class="cc-activity-list">
+            {% for scan in recent_sast %}
+            <div class="cc-activity-item">
+                <div class="cc-act-icon cc-act-sast">S</div>
+                <div class="cc-act-info">
+                    <div class="cc-act-name">{{ scan.project.name }}</div>
+                    <div class="cc-act-time">{{ scan.created_at|timesince }} ago</div>
+                </div>
+                <span class="cc-status-pill cc-status-{{ scan.status|lower }}">{{ scan.status }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="cc-empty-msg">No SAST scans yet</div>
+        {% endif %}
+    </div>
+    <div class="cc-panel">
+        <div class="cc-panel-header"><h3>⚡ Recent DAST Scans</h3></div>
+        {% if recent_dast %}
+        <div class="cc-activity-list">
+            {% for scan in recent_dast %}
+            <div class="cc-activity-item">
+                <div class="cc-act-icon cc-act-dast">D</div>
+                <div class="cc-act-info">
+                    <div class="cc-act-name">{{ scan.website.name }}</div>
+                    <div class="cc-act-time">{{ scan.created_at|timesince }} ago</div>
+                </div>
+                <span class="cc-status-pill cc-status-{{ scan.status|lower }}">{{ scan.status }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="cc-empty-msg">No DAST scans yet</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="cc-actions">
+    <a href="{% url 'project_create' %}" class="cc-action-btn cc-action-sast">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/></svg>
+        New SAST Project
+    </a>
+    <a href="{% url 'dast' %}" class="cc-action-btn cc-action-dast">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>
+        Launch DAST Scan
+    </a>
+    <a href="{% url 'project_list' %}" class="cc-action-btn cc-action-projects">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .342-1.31z"/></svg>
+        All Projects
+    </a>
+</div>
+
+</div><!-- end cc-wrapper -->
+
+<script>
+function animateCount(el, target) {
+    let current = 0;
+    const duration = 1200;
+    const step = Math.max(1, Math.ceil(target / (duration / 16)));
+    const timer = setInterval(() => {
+        current = Math.min(current + step, target);
+        el.textContent = current.toLocaleString();
+        if (current >= target) clearInterval(timer);
+    }, 16);
+}
+
+function commandCenter() {
+    return {
+        activeTotal: {{ active_total }},
+        init() {}
+    };
+}
+
+function severityChart(data) {
+    return {
+        data: data,
+        max() { return Math.max(1, ...Object.values(this.data)); },
+        pct(key) { return (this.data[key] / this.max()) * 100; }
+    };
+}
+
+function fixRing(pending, accepted, rejected) {
+    const total = pending + accepted + rejected;
+    const circ = 2 * Math.PI * 50;
+    const safe = Math.max(1, total);
+    return {
+        total: total,
+        pendingLen: (pending / safe) * circ,
+        acceptedLen: (accepted / safe) * circ,
+        rejectedLen: (rejected / safe) * circ,
+        get pendingDash() { return this.pendingLen + ' ' + circ; },
+        get acceptedDash() { return this.acceptedLen + ' ' + circ; },
+        get rejectedDash() { return this.rejectedLen + ' ' + circ; },
+    };
+}
+</script>
+{% endblock %}

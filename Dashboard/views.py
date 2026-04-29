@@ -6,9 +6,11 @@ from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib import messages
 from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
+from django.db.models import Count, Q, Sum
 from .tasks import simple_test_task, run_specialist_scan
-from .models import Website, NucleiTemplate, ScanJob, NucleiConfig
+from .models import Website, NucleiTemplate, ScanJob, NucleiConfig, ScanResult
 import subprocess
+import json
 from VulnAssesor.celery import app as celery_app
 
 # Authentication Views
@@ -45,10 +47,170 @@ def logout_view(request):
     messages.info(request, 'You have been logged out.')
     return redirect('login')
 
-# Dashboard and Website CRUD Views
+# Main Dashboard (Command Center)
 
 @login_required
 def dashboard_view(request):
+    """Comprehensive dashboard aggregating SAST + DAST data."""
+    from SAST.models import Project, SASTScanJob, SASTFinding, SASTFix
+
+    user = request.user
+
+    # --- SAST Data ---
+    projects = Project.objects.filter(owner=user)
+    total_projects = projects.count()
+    projects_ready = projects.filter(status='READY').count()
+    projects_pending = projects.filter(status__in=['PENDING', 'CLONING']).count()
+
+    sast_scans = SASTScanJob.objects.filter(project__owner=user)
+    total_sast_scans = sast_scans.count()
+    active_sast_scans = sast_scans.filter(status__in=['PENDING', 'SCANNING', 'CLONING'])
+    active_sast_count = active_sast_scans.count()
+    completed_sast_scans = sast_scans.filter(status='COMPLETED').count()
+
+    sast_findings = SASTFinding.objects.filter(scan_job__project__owner=user)
+    total_sast_findings = sast_findings.count()
+    sast_critical = sast_findings.filter(severity='CRITICAL').count()
+    sast_high = sast_findings.filter(severity='HIGH').count()
+    sast_medium = sast_findings.filter(severity='MEDIUM').count()
+    sast_low = sast_findings.filter(severity='LOW').count()
+    sast_info = sast_findings.filter(severity='INFO').count()
+
+    sast_fixes = SASTFix.objects.filter(finding__scan_job__project__owner=user)
+    total_fixes = sast_fixes.count()
+    fixes_pending = sast_fixes.filter(status='PENDING').count()
+    fixes_accepted = sast_fixes.filter(status='ACCEPTED').count()
+    fixes_rejected = sast_fixes.filter(status='REJECTED').count()
+
+    # --- DAST Data ---
+    websites = Website.objects.filter(owner=user)
+    total_websites = websites.count()
+
+    dast_scans = ScanJob.objects.filter(website__owner=user)
+    total_dast_scans = dast_scans.count()
+    active_dast_scans = dast_scans.filter(status__in=['PENDING', 'RUNNING'])
+    active_dast_count = active_dast_scans.count()
+    completed_dast_scans = dast_scans.filter(status='COMPLETED').count()
+
+    dast_results = ScanResult.objects.filter(job__website__owner=user)
+    total_dast_findings = dast_results.count()
+    dast_critical = dast_results.filter(severity='critical').count()
+    dast_high = dast_results.filter(severity='high').count()
+    dast_medium = dast_results.filter(severity='medium').count()
+    dast_low = dast_results.filter(severity='low').count()
+    dast_info = dast_results.filter(severity='info').count()
+
+    # --- Agent Metadata (tool calls, etc.) ---
+    total_tool_calls = 0
+    total_compactions = 0
+    tool_counts_agg = {}
+    for scan in sast_scans.filter(agent_run_metadata__isnull=False):
+        meta = scan.agent_run_metadata or {}
+        total_tool_calls += meta.get('tool_call_count', 0)
+        total_compactions += meta.get('compactions', 0)
+        for tool_name, cnt in meta.get('tool_counts', {}).items():
+            tool_counts_agg[tool_name] = tool_counts_agg.get(tool_name, 0) + cnt
+
+    # --- Recent Activity ---
+    recent_sast = list(sast_scans.select_related('project').order_by('-created_at')[:5])
+    recent_dast = list(dast_scans.select_related('website').order_by('-created_at')[:5])
+
+    # --- Active Scans (for live indicators) ---
+    active_scans_list = []
+    for s in active_sast_scans.select_related('project')[:5]:
+        active_scans_list.append({
+            'type': 'SAST',
+            'name': s.project.name,
+            'status': s.status,
+            'id': s.id,
+            'started': s.created_at.isoformat(),
+        })
+    for s in active_dast_scans.select_related('website')[:5]:
+        active_scans_list.append({
+            'type': 'DAST',
+            'name': s.website.name,
+            'status': s.status,
+            'id': s.id,
+            'started': s.created_at.isoformat(),
+        })
+
+    # --- Per-project summary for table ---
+    project_summaries = []
+    for p in projects.order_by('-updated_at')[:10]:
+        p_findings = SASTFinding.objects.filter(scan_job__project=p)
+        p_scans = p.scans.count()
+        latest = p.scans.order_by('-created_at').first()
+        project_summaries.append({
+            'id': p.id,
+            'name': p.name,
+            'status': p.status,
+            'total_scans': p_scans,
+            'total_findings': p_findings.count(),
+            'critical': p_findings.filter(severity='CRITICAL').count(),
+            'high': p_findings.filter(severity='HIGH').count(),
+            'last_scan': latest.created_at if latest else None,
+            'last_scan_status': latest.status if latest else None,
+        })
+
+    context = {
+        # Totals
+        'total_projects': total_projects,
+        'projects_ready': projects_ready,
+        'projects_pending': projects_pending,
+        'total_websites': total_websites,
+        # SAST
+        'total_sast_scans': total_sast_scans,
+        'active_sast_count': active_sast_count,
+        'completed_sast_scans': completed_sast_scans,
+        'total_sast_findings': total_sast_findings,
+        'sast_critical': sast_critical,
+        'sast_high': sast_high,
+        'sast_medium': sast_medium,
+        'sast_low': sast_low,
+        'sast_info': sast_info,
+        # DAST
+        'total_dast_scans': total_dast_scans,
+        'active_dast_count': active_dast_count,
+        'completed_dast_scans': completed_dast_scans,
+        'total_dast_findings': total_dast_findings,
+        'dast_critical': dast_critical,
+        'dast_high': dast_high,
+        'dast_medium': dast_medium,
+        'dast_low': dast_low,
+        'dast_info': dast_info,
+        # Fixes
+        'total_fixes': total_fixes,
+        'fixes_pending': fixes_pending,
+        'fixes_accepted': fixes_accepted,
+        'fixes_rejected': fixes_rejected,
+        # Agent
+        'total_tool_calls': total_tool_calls,
+        'total_compactions': total_compactions,
+        'tool_counts_json': json.dumps(tool_counts_agg),
+        # Active & Recent
+        'active_scans_json': json.dumps(active_scans_list),
+        'active_total': active_sast_count + active_dast_count,
+        'recent_sast': recent_sast,
+        'recent_dast': recent_dast,
+        # Project table
+        'project_summaries': project_summaries,
+        # Severity chart data (combined)
+        'severity_json': json.dumps({
+            'critical': sast_critical + dast_critical,
+            'high': sast_high + dast_high,
+            'medium': sast_medium + dast_medium,
+            'low': sast_low + dast_low,
+            'info': sast_info + dast_info,
+        }),
+    }
+    return render(request, 'dashboard/main_dashboard.html', context)
+
+
+# DAST Page (formerly "Dashboard")
+
+@login_required
+def dast_view(request):
+    """DAST page - websites and DAST scans (previously dashboard_view)."""
     websites = Website.objects.filter(owner=request.user)
 
     # Optimize query with select_related and prefetch_related
@@ -60,7 +222,7 @@ def dashboard_view(request):
         'results'
     ).order_by('-created_at')[:10]
 
-    return render(request, 'dashboard/dashboard.html', {
+    return render(request, 'dashboard/dast.html', {
         'websites': websites,
         'recent_scans': recent_scans,
     })
