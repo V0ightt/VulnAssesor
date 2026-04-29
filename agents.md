@@ -1,7 +1,7 @@
 # VulnAssesor Project Specification
 
 - **Last Updated:** April 29, 2026
-- **Current State:** Working Django 5.2 application with Nuclei DAST and configurable AI-backed SAST
+- **Current State:** Working Django 5.2 application with Nuclei DAST and configurable AI-backed multi-agent SAST
 - **Operational Mode:** Development-oriented stack with background workers and live HTMX updates
 
 ---
@@ -11,7 +11,7 @@
 VulnAssesor is a Django-based security workspace for two related workflows:
 
 - **DAST** for live website scanning with Nuclei.
-- **SAST** for repository analysis using a configurable AI-backed agent that explores code with tool calls.
+- **SAST** for repository analysis using a configurable AI-backed orchestrator and sequential specialist agents that explore code with tool calls.
 
 The application is server-rendered, user-scoped, and intentionally simple to operate: users sign in, register websites or projects, launch scans, and review results in the browser. HTMX and Alpine.js provide the live interactions, while Celery and Redis handle background work.
 
@@ -53,7 +53,10 @@ This document is the implementation reference for the current repository. It sho
 - `USE_SQLITE=True` - switch to SQLite
 - `DJANGO_ALLOWED_HOSTS` - comma-separated host list
 - `POSTGRES_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` - PostgreSQL connection settings
-- `SAST_SCAN_MAX_TOOL_CALLS`
+- `SAST_SCAN_MAX_TOOL_CALLS` - shared fallback tool-call budget
+- `SAST_SCAN_ORCHESTRATOR_MAX_TOOL_CALLS` - broad surface-discovery tool-call budget; defaults to `SAST_SCAN_MAX_TOOL_CALLS`
+- `SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS` - per-specialist phase tool-call budget; defaults to half of `SAST_SCAN_MAX_TOOL_CALLS`, minimum 6
+- `SAST_SCAN_MAX_SPECIALISTS` - maximum deduplicated surfaces dispatched in one scan; defaults to 6
 - `SAST_SCAN_MAX_SEARCH_RESULTS`
 - `SAST_SCAN_MAX_READ_LINES`
 - `SAST_SCAN_MAX_DIRECTORY_ENTRIES`
@@ -68,6 +71,7 @@ This document is the implementation reference for the current repository. It sho
 ### Top-level ownership
 - `Dashboard/` - authentication, website CRUD, Nuclei template CRUD, DAST scan orchestration, Nuclei configuration, and helper endpoints
 - `SAST/` - project ingestion, repository exploration, SAST scans, fix generation, and workspace services
+- `SAST/agents/` - orchestrator, specialist agents, structured schemas, memory aggregation, and registry dispatch
 - `templates/` - Django UI templates and HTMX partials
 - `static/` - CSS and client assets
 - `nuclei-templates/` - bundled Nuclei YAML templates that can be loaded into the database
@@ -402,18 +406,19 @@ When a scan starts, `run_sast_scan`:
 2. Fails fast unless the project is `READY`.
 3. Sets the scan to `SCANNING`.
 4. Captures the repository head commit if the project is a Git checkout.
-5. Loads `AIConfig` and instantiates `SASTAgent` with the configured provider.
-6. Runs `scan_project()` to gather supported findings.
-7. Persists `SASTFinding` rows through `report_vulnerability`.
-8. Generates a fix with `generate_fix(finding)`.
-9. Verifies the fix with `verify_fix(finding, fix_data)`.
-10. Saves the result through `apply_fix(...)` as a `SASTFix` row.
-11. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
+5. Instantiates `SASTScanOrchestrator`, which loads `AIConfig` once and builds one provider.
+6. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces.
+7. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
+8. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
+9. Stores aggregate orchestrator and specialist metadata in `agent_run_metadata`.
+10. Persists `SASTFinding` rows through `report_vulnerability`.
+11. Saves proposed fixes through `apply_fix(...)` as `SASTFix` rows.
+12. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
 
 Cancellation behavior:
 - `cancel_scan` marks an active scan as `CANCELLED`.
 - `cancel_ingestion` revokes the ingestion task and marks the project `CANCELLED`.
-- `SASTAgent._ensure_scan_active()` raises a dedicated cancellation exception when the active scan job flips to `CANCELLED`.
+- `BaseToolCallingAgent._ensure_scan_active()` raises a dedicated cancellation exception when the active scan job flips to `CANCELLED`.
 
 ### 6.4 Project manager and workspace safety
 
@@ -461,13 +466,16 @@ Behavior notes:
 
 ### 6.6 AI agent design
 
-`SAST/agent.py` is the current SAST engine.
+`SAST/agents/` is the current SAST engine. `SAST/agent.py` remains as a compatibility layer that re-exports the legacy schemas, `ScanMemoryManager`, `ScanCancelledError`, and a deprecated `SASTAgent` facade for older imports.
 
 Core characteristics:
-- It uses a provider abstraction with tool calling for OpenAI, Claude, and DeepSeek.
-- OpenAI and DeepSeek use OpenAI-compatible chat completions.
-- Claude uses the Anthropic Messages API.
-- It loads the target project's `agents.md` and `README.md` into the system context when available.
+- `SASTScanOrchestrator` runs inside the existing `run_sast_scan` Celery task.
+- `OrchestratorAgent` performs broad repository exploration and returns potential `VulnerabilitySurface` objects only.
+- `SpecialistRegistry` maps vulnerability types to specialist classes and falls back to `GenericSecuritySpecialistAgent`.
+- Specialists run sequentially for v1; Celery fan-out is intentionally deferred.
+- Agents return structured data only. `run_sast_scan` remains the persistence boundary for findings and fixes.
+- One provider is built from `AIConfig` per scan and passed to each agent; each agent starts its own conversation.
+- It loads the target project's `agents.md`, `AGENTS.md`, and `README.md` into the system context when available.
 - It does not assume repository contents that have not been discovered through tool calls.
 - It focuses on exploitable vulnerabilities only, not style warnings.
 
@@ -475,6 +483,28 @@ Current tool set:
 - `list_directory`
 - `search_codebase`
 - `read_file`
+
+Current specialists:
+- `SQLiSpecialistAgent`
+- `XSSSpecialistAgent`
+- `AuthBypassSpecialistAgent`
+- `PathTraversalSpecialistAgent`
+- `CommandInjectionSpecialistAgent`
+- `GenericSecuritySpecialistAgent`
+
+Supported vulnerability surface types:
+- `SQL_INJECTION`
+- `XSS`
+- `AUTH_BYPASS`
+- `PATH_TRAVERSAL`
+- `COMMAND_INJECTION`
+- `SSRF`
+- `DESERIALIZATION`
+- `SECRETS`
+- `ACCESS_CONTROL`
+- `FILE_UPLOAD`
+- `TEMPLATE_INJECTION`
+- `OTHER`
 
 Current default model names:
 - OpenAI: `gpt-5-nano` for scanning, fix generation, and verification
@@ -487,20 +517,21 @@ Structured output models:
 - `ScanResult`
 - `FixResult`
 - `VerificationResult`
-
-Current public methods:
-- `scan_project()`
-- `generate_fix(finding)`
-- `verify_fix(finding, fix_data)`
+- `VulnerabilitySurface`
+- `OrchestratorSurfaceResult`
+- `SpecialistFindingResult`
+- `ScanExecutionResult`
 
 Supporting components:
+- `BaseToolCallingAgent` owns project context loading, tool definitions, tool dispatch, structured parsing, and cancellation checks.
 - `ScanMemoryManager` tracks explored paths, tool counts, truncation, and compacts older tool output.
+- `aggregate_scan_metadata()` preserves legacy top-level metadata keys and adds nested `orchestrator` and `specialists` metadata.
 - `ExplorationResult` wraps the raw investigation transcript and metadata.
 - `ScanCancelledError` is raised when the active scan is cancelled mid-run.
 - `SAST/llm/` contains provider adapters and the provider registry.
 
 Implementation note:
-- This is a repository-exploration agent, not a simple per-file loop. It decides what to inspect using bounded tool calls, then converts the gathered evidence into structured findings.
+- This is a repository-exploration pipeline, not a simple per-file loop. The orchestrator decides which surfaces merit deeper review, and specialists convert gathered evidence into confirmed findings, proposed fixes, and verification results.
 
 ### 6.7 SAST templates and UI
 
@@ -567,8 +598,8 @@ Behavior notes:
 
 Current test coverage is uneven:
 - `Dashboard/tests.py` is still a placeholder.
-- `SAST/tests.py` contains meaningful coverage for the repository tools, memory manager, agent loop, cancellation behavior, and fix persistence.
-- The SAST tests also use fakes to verify response replay, structured output, and tool-loop behavior.
+- `SAST/tests.py` contains meaningful coverage for the repository tools, memory manager, orchestrator, specialist registry, specialist fix flow, cancellation behavior, and fix persistence.
+- The SAST tests also use fakes to verify response replay, structured output, provider routing, metadata aggregation, and tool-loop behavior.
 
 If you change SAST internals, the existing tests are the best safety net. Dashboard behavior still needs dedicated coverage.
 
@@ -581,6 +612,7 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - DAST AI enrichment is not yet wired in.
 - Fix application, branch creation, and pull request automation remain future work.
 - `SASTFix` stores proposed fixes, but there is no complete accept/reject/apply UI yet.
+- SAST specialists run sequentially in one Celery task; distributed fan-out is intentionally deferred.
 - ZIP extraction should be reviewed if the project is used with untrusted uploads in a hardened environment.
 - The current stack assumes a running Celery worker and Redis broker for scan execution.
 - DAST does not currently enforce a single active scan per website in the same way SAST cancels existing project scans.
@@ -599,7 +631,7 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - DAST results viewing, filtering, and export
 - Project ingestion from Git or ZIP
 - Repository browsing endpoints
-- AI-assisted SAST scanning
+- AI-assisted SAST scanning with orchestrator and specialist agents
 - Fix generation and verification
 - Workspace deletion and cancellation flows
 - Docker-based local environment

@@ -1,7 +1,7 @@
 import os
 import shutil
+import uuid
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import mock
 
@@ -16,6 +16,14 @@ from .agent import (
     ScanResult,
     VerificationResult,
     Vulnerability,
+)
+from .agents.memory import aggregate_scan_metadata
+from .agents.orchestrator import OrchestratorAgent
+from .agents.registry import SpecialistRegistry
+from .agents.schemas import OrchestratorSurfaceResult, VulnerabilitySurface
+from .agents.specialists import (
+    CommandInjectionSpecialistAgent,
+    GenericSecuritySpecialistAgent,
 )
 from .models import Project, SASTFix, SASTScanJob
 from .services import ProjectManager
@@ -82,11 +90,13 @@ def fake_tool_call(call_id, name, arguments):
 class WorkspaceTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        self.temp_media = TemporaryDirectory()
-        self.media_override = override_settings(MEDIA_ROOT=self.temp_media.name)
+        temp_root = Path(os.environ.get('SAST_TEST_TEMP_DIR', Path.cwd() / 'media'))
+        self.temp_media_path = temp_root / f'test-media-{os.getpid()}-{uuid.uuid4().hex}'
+        self.temp_media_path.mkdir(parents=True, exist_ok=True)
+        self.media_override = override_settings(MEDIA_ROOT=str(self.temp_media_path))
         self.media_override.enable()
         self.addCleanup(self.media_override.disable)
-        self.addCleanup(self.temp_media.cleanup)
+        self.addCleanup(lambda: shutil.rmtree(self.temp_media_path, ignore_errors=True))
         self.env_patcher = mock.patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'})
         self.env_patcher.start()
         self.addCleanup(self.env_patcher.stop)
@@ -195,6 +205,41 @@ class MemoryManagerTests(TestCase):
         self.assertEqual(metadata['truncation_count'], 1)
         self.assertIn('app/views.py', metadata['explored_paths'])
         self.assertIn('Potential command injection found.', metadata['summary'])
+
+    def test_aggregate_scan_metadata_preserves_legacy_top_level_keys(self):
+        orchestrator = {
+            'summary': 'orchestrator summary',
+            'tool_call_count': 2,
+            'tool_counts': {'list_directory': 1, 'search_codebase': 1},
+            'truncation_count': 0,
+            'explored_paths': ['app/views.py'],
+            'compactions': 1,
+            'stop_reason': 'completed',
+        }
+        specialist = {
+            'surface_id': 'surface-1',
+            'vulnerability_type': 'COMMAND_INJECTION',
+            'metadata': {
+                'summary': 'specialist summary',
+                'tool_call_count': 1,
+                'tool_counts': {'read_file': 1},
+                'truncation_count': 1,
+                'explored_paths': ['app/views.py'],
+                'compactions': 0,
+                'stop_reason': 'completed',
+            },
+        }
+
+        metadata = aggregate_scan_metadata(orchestrator, [specialist])
+
+        self.assertEqual(metadata['tool_call_count'], 3)
+        self.assertEqual(metadata['tool_counts']['read_file'], 1)
+        self.assertEqual(metadata['truncation_count'], 1)
+        self.assertEqual(metadata['explored_paths'], ['app/views.py'])
+        self.assertEqual(metadata['compactions'], 1)
+        self.assertEqual(metadata['stop_reason'], 'completed')
+        self.assertEqual(metadata['orchestrator'], orchestrator)
+        self.assertEqual(metadata['specialists'][0]['surface_id'], 'surface-1')
 
 
 class ProviderAdapterTests(TestCase):
@@ -355,61 +400,189 @@ class AgentLoopTests(WorkspaceTestCase):
             return {'directory': directory, 'entries': [], 'truncated': False}
 
         with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
-            with mock.patch('SAST.agent.list_directory', side_effect=cancel_after_first_tool):
+            with mock.patch('SAST.agents.base.list_directory', side_effect=cancel_after_first_tool):
                 agent = SASTAgent(self.project, scan_job=scan_job)
                 with self.assertRaises(ScanCancelledError):
                     agent.scan_project()
 
 
+class MultiAgentPipelineTests(WorkspaceTestCase):
+    def provider_settings(self):
+        return {
+            'scan_model': 'scan-model',
+            'fix_model': 'fix-model',
+            'verify_model': 'verify-model',
+        }
+
+    def surface(self, vulnerability_type='COMMAND_INJECTION'):
+        return VulnerabilitySurface(
+            surface_id='surface-1',
+            vulnerability_type=vulnerability_type,
+            title='Possible command injection',
+            rationale='Request input appears to reach subprocess usage.',
+            evidence_paths=['app/views.py'],
+            recommended_files=['app/views.py'],
+            priority='HIGH',
+        )
+
+    def vulnerability(self):
+        return Vulnerability(
+            file_path='app/views.py',
+            line_number=9,
+            severity='HIGH',
+            title='Command Injection',
+            description='User-controlled shell command execution.',
+            code_snippet='subprocess.run(user_cmd, shell=True, capture_output=True, text=True)',
+            confidence_score=0.97,
+            ai_explanation='The handler passes attacker-controlled input to a shell.',
+        )
+
+    def fix(self):
+        return FixResult(
+            scope='SNIPPET',
+            start_line=8,
+            end_line=9,
+            fixed_code='safe_cmd = [user_cmd]\nreturn subprocess.run(safe_cmd, shell=False, capture_output=True, text=True)',
+            explanation='Execute the command without invoking a shell.',
+        )
+
+    def verification(self):
+        return VerificationResult(
+            is_true_positive=True,
+            reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
+        )
+
+    def test_registry_dispatches_known_types_and_unknown_falls_back(self):
+        registry = SpecialistRegistry()
+
+        self.assertIs(registry.get_specialist_class('COMMAND_INJECTION'), CommandInjectionSpecialistAgent)
+        self.assertIs(registry.get_specialist_class('unexpected'), GenericSecuritySpecialistAgent)
+
+    def test_orchestrator_discovers_surfaces_without_direct_findings(self):
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call('orch-1', 'list_directory', '{"directory":""}')),
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+            ],
+        )
+
+        agent = OrchestratorAgent(
+            self.project,
+            provider=fake_provider,
+            provider_settings=self.provider_settings(),
+        )
+        surfaces = agent.discover_surfaces()
+
+        self.assertEqual(len(surfaces), 1)
+        self.assertEqual(surfaces[0].vulnerability_type, 'COMMAND_INJECTION')
+        self.assertIs(fake_provider.parse_calls[0]['schema'], OrchestratorSurfaceResult)
+        self.assertEqual(agent.last_metadata['tool_call_count'], 1)
+
+    def test_specialist_investigates_generates_fix_and_verifies(self):
+        self.load_fixture_repo()
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call('spec-1', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+                fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
+                fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
+                fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
+                fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
+                fake_tool_response(output_text='The fix removes shell execution.'),
+            ],
+            parse_responses=[
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                self.verification(),
+            ],
+        )
+        specialist = CommandInjectionSpecialistAgent(
+            self.project,
+            provider=fake_provider,
+            provider_settings=self.provider_settings(),
+        )
+
+        results = specialist.run(self.surface())
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].surface_id, 'surface-1')
+        self.assertEqual(results[0].fix.scope, 'SNIPPET')
+        self.assertTrue(results[0].verification.is_true_positive)
+        self.assertEqual(results[0].specialist_metadata['tool_call_count'], 3)
+        self.assertEqual(len(results[0].specialist_metadata['phases']), 3)
+
+
 class RunSastScanTaskTests(WorkspaceTestCase):
+    def surface(self):
+        return VulnerabilitySurface(
+            surface_id='surface-1',
+            vulnerability_type='COMMAND_INJECTION',
+            title='Possible command injection',
+            rationale='Request input appears to reach subprocess usage.',
+            evidence_paths=['app/views.py'],
+            recommended_files=['app/views.py'],
+            priority='HIGH',
+        )
+
+    def vulnerability(self):
+        return Vulnerability(
+            file_path='app/views.py',
+            line_number=9,
+            severity='HIGH',
+            title='Command Injection',
+            description='User-controlled shell command execution.',
+            code_snippet='subprocess.run(user_cmd, shell=True, capture_output=True, text=True)',
+            confidence_score=0.97,
+            ai_explanation='The handler passes attacker-controlled input to a shell.',
+        )
+
+    def fix(self):
+        return FixResult(
+            scope='SNIPPET',
+            start_line=8,
+            end_line=9,
+            fixed_code='safe_cmd = [user_cmd]\nreturn subprocess.run(safe_cmd, shell=False, capture_output=True, text=True)',
+            explanation='Execute the command without invoking a shell.',
+        )
+
+    def verification(self):
+        return VerificationResult(
+            is_true_positive=True,
+            reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
+        )
+
     def test_run_sast_scan_routes_all_ai_calls_through_provider(self):
         self.load_fixture_repo()
         scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
         fake_provider = FakeProvider(
             tool_responses=[
-                fake_tool_response(fake_tool_call('scan-1', 'list_directory', '{"directory":""}')),
-                fake_tool_response(fake_tool_call('scan-2', 'search_codebase', '{"query":"subprocess.run","directory":"app"}')),
-                fake_tool_response(fake_tool_call('scan-3', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
-                fake_tool_response(output_text='The app uses user input in a shell command.'),
+                fake_tool_response(fake_tool_call('orch-1', 'list_directory', '{"directory":""}')),
+                fake_tool_response(fake_tool_call('orch-2', 'search_codebase', '{"query":"subprocess.run","directory":"app"}')),
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+                fake_tool_response(fake_tool_call('spec-1', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+                fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
                 fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
                 fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='The fix removes shell execution and remains syntactically safe.'),
             ],
             parse_responses=[
-                ScanResult(findings=[
-                    Vulnerability(
-                        file_path='app/views.py',
-                        line_number=9,
-                        severity='HIGH',
-                        title='Command Injection',
-                        description='User-controlled shell command execution.',
-                        code_snippet='subprocess.run(user_cmd, shell=True, capture_output=True, text=True)',
-                        confidence_score=0.97,
-                        ai_explanation='The handler passes attacker-controlled input to a shell.',
-                    )
-                ]),
-                FixResult(
-                    scope='SNIPPET',
-                    start_line=8,
-                    end_line=9,
-                    fixed_code='safe_cmd = [user_cmd]\nreturn subprocess.run(safe_cmd, shell=False, capture_output=True, text=True)',
-                    explanation='Execute the command without invoking a shell.',
-                ),
-                VerificationResult(
-                    is_true_positive=True,
-                    reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
-                ),
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                self.verification(),
             ],
         )
 
-        with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
             result = run_sast_scan(scan_job.id)
 
         scan_job.refresh_from_db()
         self.assertEqual(scan_job.status, 'COMPLETED')
         self.assertIn('completed', result.lower())
-        self.assertEqual(len(fake_provider.parse_calls), 3)
+        self.assertEqual(len(fake_provider.parse_calls), 4)
         self.assertEqual(len(fake_provider.appended_tool_results), 5)
         self.assertEqual(fake_provider.create_calls[0]['model'], 'gpt-5-nano')
 
@@ -418,49 +591,33 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
         fake_provider = FakeProvider(
             tool_responses=[
-                fake_tool_response(fake_tool_call('scan-1', 'list_directory', '{"directory":""}')),
-                fake_tool_response(fake_tool_call('scan-2', 'search_codebase', '{"query":"subprocess.run","directory":"app"}')),
-                fake_tool_response(fake_tool_call('scan-3', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
-                fake_tool_response(output_text='The app uses user input in a shell command.'),
+                fake_tool_response(fake_tool_call('orch-1', 'list_directory', '{"directory":""}')),
+                fake_tool_response(fake_tool_call('orch-2', 'search_codebase', '{"query":"subprocess.run","directory":"app"}')),
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+                fake_tool_response(fake_tool_call('spec-1', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+                fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
                 fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
                 fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='The fix removes shell execution and remains syntactically safe.'),
             ],
             parse_responses=[
-                ScanResult(findings=[
-                    Vulnerability(
-                        file_path='app/views.py',
-                        line_number=9,
-                        severity='HIGH',
-                        title='Command Injection',
-                        description='User-controlled shell command execution.',
-                        code_snippet='subprocess.run(user_cmd, shell=True, capture_output=True, text=True)',
-                        confidence_score=0.97,
-                        ai_explanation='The handler passes attacker-controlled input to a shell.',
-                    )
-                ]),
-                FixResult(
-                    scope='SNIPPET',
-                    start_line=8,
-                    end_line=9,
-                    fixed_code='safe_cmd = [user_cmd]\nreturn subprocess.run(safe_cmd, shell=False, capture_output=True, text=True)',
-                    explanation='Execute the command without invoking a shell.',
-                ),
-                VerificationResult(
-                    is_true_positive=True,
-                    reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
-                ),
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                self.verification(),
             ],
         )
 
-        with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
             result = run_sast_scan(scan_job.id)
 
         scan_job.refresh_from_db()
         self.assertEqual(scan_job.status, 'COMPLETED')
         self.assertIn('completed', result.lower())
-        self.assertEqual(scan_job.agent_run_metadata['tool_call_count'], 3)
+        self.assertEqual(scan_job.agent_run_metadata['tool_call_count'], 5)
+        self.assertIn('orchestrator', scan_job.agent_run_metadata)
+        self.assertEqual(scan_job.agent_run_metadata['specialists'][0]['surface_id'], 'surface-1')
         self.assertEqual(scan_job.findings.count(), 1)
 
         fix = SASTFix.objects.get()
@@ -480,3 +637,64 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertIn('OPENAI_API_KEY', result)
         self.assertEqual(scan_job.agent_run_metadata['stop_reason'], 'provider_initialization_failed')
         self.assertIn('OPENAI_API_KEY', scan_job.agent_run_metadata['error'])
+
+    def test_run_sast_scan_records_cancellation_during_orchestrator(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call('orch-1', 'list_directory', '{"directory":""}')),
+            ],
+            parse_responses=[],
+        )
+
+        def cancel_after_tool(project, directory):
+            scan_job.status = 'CANCELLED'
+            scan_job.save(update_fields=['status'])
+            return {'directory': directory, 'entries': [], 'truncated': False}
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            with mock.patch('SAST.agents.base.list_directory', side_effect=cancel_after_tool):
+                result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'CANCELLED')
+        self.assertIn('cancelled', result.lower())
+        self.assertEqual(scan_job.agent_run_metadata['stop_reason'], 'cancelled')
+        self.assertEqual(scan_job.agent_run_metadata['tool_call_count'], 1)
+
+    def test_run_sast_scan_records_cancellation_during_specialist(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+                fake_tool_response(fake_tool_call('spec-1', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+            ],
+        )
+
+        def cancel_after_read(project, file_path, start_line=1, end_line=None, max_lines=None, max_bytes=None):
+            if file_path == 'app/views.py':
+                scan_job.status = 'CANCELLED'
+                scan_job.save(update_fields=['status'])
+            return {
+                'filepath': file_path,
+                'start_line': start_line,
+                'end_line': end_line,
+                'total_lines': 20,
+                'content': '',
+                'truncated': False,
+            }
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            with mock.patch('SAST.agents.base.read_file', side_effect=cancel_after_read):
+                result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'CANCELLED')
+        self.assertIn('cancelled', result.lower())
+        self.assertEqual(scan_job.agent_run_metadata['stop_reason'], 'cancelled')
+        self.assertEqual(scan_job.agent_run_metadata['specialists'][0]['surface_id'], 'surface-1')

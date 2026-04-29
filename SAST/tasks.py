@@ -2,7 +2,8 @@ from celery import shared_task
 from django.utils import timezone
 from .models import Project, SASTScanJob
 from .services import ProjectManager
-from .agent import SASTAgent, ScanCancelledError
+from .agents.base import ScanCancelledError
+from .agents.orchestrator import SASTScanOrchestrator
 from .sast_tools import report_vulnerability, apply_fix
 import logging
 
@@ -65,7 +66,7 @@ def run_sast_scan(scan_job_id):
         scan_job.save()
 
         try:
-            agent = SASTAgent(project, scan_job=scan_job)
+            orchestrator = SASTScanOrchestrator(project, scan_job=scan_job)
         except ValueError as e:
             logger.error(f"SAST Agent initialization failed: {e}")
             scan_job.status = 'FAILED'
@@ -77,16 +78,17 @@ def run_sast_scan(scan_job_id):
             scan_job.save(update_fields=['status', 'agent_run_metadata', 'completed_at'])
             return f"Scan failed: {e}"
 
-        findings = agent.scan_project()
-        scan_job.agent_run_metadata = agent.last_scan_metadata
+        scan_result = orchestrator.run()
+        scan_job.agent_run_metadata = scan_result.metadata
         scan_job.save(update_fields=['agent_run_metadata'])
 
-        for finding_data in findings:
+        for specialist_result in scan_result.findings:
             scan_job.refresh_from_db(fields=['status'])
             if scan_job.status == 'CANCELLED':
                 logger.info(f"Scan {scan_job_id} cancelled by user.")
                 return f"Scan {scan_job_id} cancelled."
 
+            finding_data = specialist_result.vulnerability.model_dump()
             finding = report_vulnerability(
                 scan_job=scan_job,
                 file_path=finding_data['file_path'],
@@ -99,21 +101,23 @@ def run_sast_scan(scan_job_id):
             finding.ai_explanation = finding_data.get('ai_explanation', '')
             finding.save()
 
-            fix_data = agent.generate_fix(finding_data)
-            verification = agent.verify_fix(finding_data, fix_data)
+            fix_data = specialist_result.fix
+            if not fix_data:
+                continue
 
-            explanation = fix_data['explanation']
-            if not verification['verified']:
-                logger.warning(f"Fix verification failed for {finding.title}: {verification['reason']}")
-                explanation = f"Verification Failed: {verification['reason']}\n\nOriginal Explanation: {explanation}"
+            explanation = fix_data.explanation
+            verification = specialist_result.verification
+            if verification and not verification.is_true_positive:
+                logger.warning(f"Fix verification failed for {finding.title}: {verification.reasoning}")
+                explanation = f"Verification Failed: {verification.reasoning}\n\nOriginal Explanation: {explanation}"
 
             apply_fix(
                 finding_id=finding.id,
-                proposed_code=fix_data['fixed_code'],
+                proposed_code=fix_data.fixed_code,
                 explanation=explanation,
-                scope=fix_data['scope'],
-                start_line=fix_data['start_line'],
-                end_line=fix_data['end_line'],
+                scope=fix_data.scope,
+                start_line=fix_data.start_line,
+                end_line=fix_data.end_line,
             )
 
         scan_job.status = 'COMPLETED'
@@ -128,7 +132,7 @@ def run_sast_scan(scan_job_id):
     except ScanCancelledError:
         if 'scan_job' in locals():
             scan_job.agent_run_metadata = {
-                **getattr(agent, 'last_scan_metadata', {}),
+                **getattr(locals().get('orchestrator'), 'last_scan_metadata', {}),
                 'stop_reason': 'cancelled',
             }
             scan_job.save(update_fields=['agent_run_metadata'])
@@ -139,12 +143,12 @@ def run_sast_scan(scan_job_id):
         logger.error(f"Error running scan {scan_job_id}: {str(e)}")
         if 'scan_job' in locals():
             scan_job.status = 'FAILED'
-            if 'agent' in locals():
-                agent.last_scan_metadata = {
-                    **getattr(agent, 'last_scan_metadata', {}),
+            if 'orchestrator' in locals():
+                orchestrator.last_scan_metadata = {
+                    **getattr(orchestrator, 'last_scan_metadata', {}),
                     'stop_reason': 'failed',
                     'error': str(e),
                 }
-                scan_job.agent_run_metadata = agent.last_scan_metadata
+                scan_job.agent_run_metadata = orchestrator.last_scan_metadata
             scan_job.save()
         return f"Error running scan: {str(e)}"

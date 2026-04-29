@@ -1,6 +1,6 @@
 # VulnAssesor
 
-VulnAssesor is a Django 5.2 security assessment workspace for websites and source repositories. It combines Nuclei-powered DAST with a configurable AI-backed SAST agent, all rendered through Django templates with HTMX and Alpine.js.
+VulnAssesor is a Django 5.2 security assessment workspace for websites and source repositories. It combines Nuclei-powered DAST with a configurable AI-backed multi-agent SAST pipeline, all rendered through Django templates with HTMX and Alpine.js.
 
 ## What You Can Do
 - Register and authenticate users.
@@ -57,7 +57,10 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 - `USE_SQLITE=True` - switch to SQLite.
 - `DJANGO_ALLOWED_HOSTS` - comma-separated host list.
 - `POSTGRES_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` - PostgreSQL settings.
-- `SAST_SCAN_MAX_TOOL_CALLS`, `SAST_SCAN_MAX_SEARCH_RESULTS`, `SAST_SCAN_MAX_READ_LINES`, `SAST_SCAN_MAX_DIRECTORY_ENTRIES`, `SAST_SCAN_MAX_TOOL_RESULT_BYTES`, `SAST_SCAN_SOFT_CONTEXT_TOKENS`, `SAST_SCAN_HARD_CONTEXT_TOKENS` - SAST agent limits.
+- `SAST_SCAN_MAX_TOOL_CALLS`, `SAST_SCAN_MAX_SEARCH_RESULTS`, `SAST_SCAN_MAX_READ_LINES`, `SAST_SCAN_MAX_DIRECTORY_ENTRIES`, `SAST_SCAN_MAX_TOOL_RESULT_BYTES`, `SAST_SCAN_SOFT_CONTEXT_TOKENS`, `SAST_SCAN_HARD_CONTEXT_TOKENS` - shared SAST tool and context limits.
+- `SAST_SCAN_ORCHESTRATOR_MAX_TOOL_CALLS` - tool-call budget for broad SAST surface discovery. Defaults to `SAST_SCAN_MAX_TOOL_CALLS`.
+- `SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS` - per-specialist tool-call budget for investigation, fix generation, and verification. Defaults to half of `SAST_SCAN_MAX_TOOL_CALLS`, with a minimum of 6.
+- `SAST_SCAN_MAX_SPECIALISTS` - maximum deduplicated vulnerability surfaces dispatched to specialists in one scan. Defaults to 6.
 
 ## How DAST Works
 1. Add a website from the dashboard.
@@ -74,10 +77,12 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 3. Project status moves through `PENDING`, `CLONING`, `READY`, `FAILED`, or `CANCELLED`.
 4. Start a scan from the project page.
 5. Any pending or running scan for that project is cancelled before a new one is queued.
-6. The agent explores the repository through tool calls instead of loading the whole tree into memory.
-7. The selected AI provider is read from Configuration > AI Providers. OpenAI, Claude, and DeepSeek each have independent scan, fix, and verification model settings.
-8. Findings store file path, line number, severity, description, code snippet, AI explanation, and a proposed fix.
-9. The project page shows scan status, scan history, and read-only workspace browsing endpoints.
+6. `SASTScanOrchestrator` runs inside the existing `run_sast_scan` Celery task.
+7. An `OrchestratorAgent` explores the repository through bounded tool calls and returns potential vulnerability surfaces only.
+8. Deduplicated surfaces are dispatched sequentially to specialist agents for deeper investigation, fix generation, and fix verification.
+9. The selected AI provider is read once from Configuration > AI Providers and shared across the sequential agents, with separate conversations per agent.
+10. Findings store file path, line number, severity, description, code snippet, AI explanation, and a proposed fix.
+11. The project page shows scan status, scan history, and read-only workspace browsing endpoints.
 
 ## Useful Commands
 - `python manage.py load_templates` - import YAML templates from `nuclei-templates/`.
@@ -89,7 +94,8 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 
 ## Project Layout
 - `Dashboard/` - auth, websites, templates, DAST scans, Nuclei config, and the Celery DAST task.
-- `SAST/` - project ingestion, repository exploration, SAST scans, fix generation, and workspace services.
+- `SAST/` - project ingestion, repository exploration, multi-agent SAST scans, fix generation, and workspace services.
+- `SAST/agents/` - orchestrator, specialist agents, structured schemas, memory aggregation, and registry dispatch.
 - `templates/` - Django templates and HTMX partials.
 - `static/` - CSS and JavaScript assets.
 - `nuclei-templates/` - bundled default Nuclei templates.
@@ -97,11 +103,12 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 - `VulnAssesor/` - project settings, URLs, and Celery bootstrap.
 
 ## Testing
-Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, agent loop, cancellation handling, and fix persistence. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
+Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, multi-agent orchestration, registry dispatch, specialist fix flow, cancellation handling, and fix persistence. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
 
 ## Current Limits
 - The app is configured for development use by default.
 - SAST fix application, branch creation, and pull request automation are not wired into the UI yet.
+- SAST specialists run sequentially inside one Celery task for v1; distributed fan-out is intentionally deferred.
 - DAST AI enrichment is not implemented yet.
 - The Nuclei configuration view is currently accessible to authenticated users in code, even though it is intended to be restricted later.
 - ZIP ingestion uses straightforward extraction and should be hardened if you expect untrusted archives.

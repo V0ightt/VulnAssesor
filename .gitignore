@@ -37,3 +37,9 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+
+# Local test/build temp directories
+tmp*/
+/tmp*/
+test-media-*/
+/test-media-*/
