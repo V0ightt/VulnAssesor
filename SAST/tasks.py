@@ -96,11 +96,32 @@ def ingest_project_task(self, project_id):
                 )
         return f"Error ingesting project: {str(e)}"
 
-@shared_task
-def run_sast_scan(scan_job_id):
+@shared_task(bind=True)
+def run_sast_scan(self, scan_job_id):
     try:
         scan_job = SASTScanJob.objects.get(id=scan_job_id)
         project = scan_job.project
+        if scan_job.celery_task_id != self.request.id:
+            scan_job.celery_task_id = self.request.id
+            scan_job.save(update_fields=['celery_task_id'])
+
+        if scan_job.status in ('CANCELLING', 'CANCELLED'):
+            scan_job.status = 'CANCELLED'
+            scan_job.completed_at = timezone.now()
+            scan_job.agent_run_metadata = {
+                **(scan_job.agent_run_metadata or {}),
+                'stop_reason': 'cancelled',
+            }
+            scan_job.save(update_fields=['status', 'completed_at', 'agent_run_metadata'])
+            record_scan_event(
+                scan_job,
+                phase='cancel',
+                event_type='cancelled',
+                title='SAST scan cancelled',
+                detail='The scan was cancelled before worker analysis began.',
+            )
+            return f"Scan {scan_job_id} cancelled."
+
         if project.status != 'READY':
             scan_job.status = 'FAILED'
             scan_job.agent_run_metadata = {
@@ -120,7 +141,7 @@ def run_sast_scan(scan_job_id):
         scan_job.status = 'SCANNING'
         manager = ProjectManager(project)
         scan_job.commit_hash = manager.get_repository_head_commit()
-        scan_job.save()
+        scan_job.save(update_fields=['status', 'commit_hash', 'celery_task_id'])
         record_scan_event(
             scan_job,
             phase='scan',
@@ -164,7 +185,10 @@ def run_sast_scan(scan_job_id):
             )
             return f"Scan failed: {e}"
 
-        scan_result = orchestrator.run()
+        def persist_specialist_result(specialist_result):
+            _persist_specialist_result(scan_job, specialist_result)
+
+        scan_result = orchestrator.run(result_callback=persist_specialist_result)
         scan_job.agent_run_metadata = scan_result.metadata
         scan_job.save(update_fields=['agent_run_metadata'])
         record_scan_event(
@@ -172,80 +196,9 @@ def run_sast_scan(scan_job_id):
             phase='persist',
             event_type='findings_ready',
             title='Agent analysis complete',
-            detail=f'{len(scan_result.findings)} confirmed finding result(s) are ready to persist.',
-            payload={'finding_results': len(scan_result.findings)},
+            detail=f'{len(scan_result.findings)} confirmed finding result(s) were processed.',
+            payload={'finding_results': len(scan_result.findings), 'findings_saved': scan_job.findings.count()},
         )
-
-        for specialist_result in scan_result.findings:
-            scan_job.refresh_from_db(fields=['status'])
-            if scan_job.status == 'CANCELLED':
-                logger.info(f"Scan {scan_job_id} cancelled by user.")
-                record_scan_event(
-                    scan_job,
-                    phase='cancel',
-                    event_type='cancelled',
-                    title='SAST scan cancelled',
-                    detail='Persistence stopped because cancellation was requested.',
-                )
-                return f"Scan {scan_job_id} cancelled."
-
-            finding_data = specialist_result.vulnerability.model_dump()
-            record_scan_event(
-                scan_job,
-                phase='persist',
-                event_type='finding',
-                title=f"Persisting finding: {finding_data['title']}",
-                detail=f"{finding_data['severity']} in {finding_data['file_path']}:{finding_data['line_number']}.",
-                payload={
-                    'severity': finding_data['severity'],
-                    'file_path': finding_data['file_path'],
-                    'line_number': finding_data['line_number'],
-                    'vulnerability_type': specialist_result.vulnerability_type,
-                },
-            )
-            finding = report_vulnerability(
-                scan_job=scan_job,
-                file_path=finding_data['file_path'],
-                line_number=finding_data['line_number'],
-                severity=finding_data['severity'],
-                title=finding_data['title'],
-                description=finding_data['description'],
-                code_snippet=finding_data['code_snippet'],
-            )
-            finding.ai_explanation = finding_data.get('ai_explanation', '')
-            finding.save()
-
-            fix_data = specialist_result.fix
-            if not fix_data:
-                continue
-
-            explanation = fix_data.explanation
-            verification = specialist_result.verification
-            if verification and not verification.is_true_positive:
-                logger.warning(f"Fix verification failed for {finding.title}: {verification.reasoning}")
-                explanation = f"Verification Failed: {verification.reasoning}\n\nOriginal Explanation: {explanation}"
-
-            apply_fix(
-                finding_id=finding.id,
-                proposed_code=fix_data.fixed_code,
-                explanation=explanation,
-                scope=fix_data.scope,
-                start_line=fix_data.start_line,
-                end_line=fix_data.end_line,
-            )
-            record_scan_event(
-                scan_job,
-                phase='persist',
-                event_type='fix',
-                title='Proposed fix saved',
-                detail=f"Stored a {fix_data.scope.lower()} fix for {finding.title}.",
-                payload={
-                    'finding_id': finding.id,
-                    'scope': fix_data.scope,
-                    'start_line': fix_data.start_line,
-                    'end_line': fix_data.end_line,
-                },
-            )
 
         scan_job.status = 'COMPLETED'
         scan_job.completed_at = timezone.now()
@@ -266,11 +219,15 @@ def run_sast_scan(scan_job_id):
         
     except ScanCancelledError:
         if 'scan_job' in locals():
+            scan_job.refresh_from_db()
             scan_job.agent_run_metadata = {
                 **getattr(locals().get('orchestrator'), 'last_scan_metadata', {}),
                 'stop_reason': 'cancelled',
+                'findings_saved': scan_job.findings.count(),
             }
-            scan_job.save(update_fields=['agent_run_metadata'])
+            scan_job.status = 'CANCELLED'
+            scan_job.completed_at = timezone.now()
+            scan_job.save(update_fields=['status', 'completed_at', 'agent_run_metadata'])
             record_scan_event(
                 scan_job,
                 phase='cancel',
@@ -284,6 +241,24 @@ def run_sast_scan(scan_job_id):
     except Exception as e:
         logger.error(f"Error running scan {scan_job_id}: {str(e)}")
         if 'scan_job' in locals():
+            scan_job.refresh_from_db(fields=['status'])
+            if scan_job.status == 'CANCELLING':
+                scan_job.status = 'CANCELLED'
+                scan_job.completed_at = timezone.now()
+                scan_job.agent_run_metadata = {
+                    **getattr(locals().get('orchestrator'), 'last_scan_metadata', {}),
+                    'stop_reason': 'cancelled',
+                    'findings_saved': scan_job.findings.count(),
+                }
+                scan_job.save(update_fields=['status', 'completed_at', 'agent_run_metadata'])
+                record_scan_event(
+                    scan_job,
+                    phase='cancel',
+                    event_type='cancelled',
+                    title='SAST scan cancelled',
+                    detail='The scan stopped during worker cleanup.',
+                )
+                return f"Scan {scan_job_id} cancelled."
             scan_job.status = 'FAILED'
             scan_job.completed_at = timezone.now()
             if 'orchestrator' in locals():
@@ -302,3 +277,71 @@ def run_sast_scan(scan_job_id):
                 detail=str(e),
             )
         return f"Error running scan: {str(e)}"
+
+
+def _persist_specialist_result(scan_job, specialist_result):
+    finding_data = specialist_result.vulnerability.model_dump()
+    record_scan_event(
+        scan_job,
+        phase='persist',
+        event_type='finding',
+        title=f"Persisting finding: {finding_data['title']}",
+        detail=f"{finding_data['severity']} in {finding_data['file_path']}:{finding_data['line_number']}.",
+        payload={
+            'severity': finding_data['severity'],
+            'file_path': finding_data['file_path'],
+            'line_number': finding_data['line_number'],
+            'vulnerability_type': specialist_result.vulnerability_type,
+        },
+    )
+    finding = report_vulnerability(
+        scan_job=scan_job,
+        file_path=finding_data['file_path'],
+        line_number=finding_data['line_number'],
+        severity=finding_data['severity'],
+        title=finding_data['title'],
+        description=finding_data['description'],
+        code_snippet=finding_data['code_snippet'],
+        confidence_score=finding_data.get('confidence_score'),
+    )
+    finding.ai_explanation = finding_data.get('ai_explanation', '')
+    finding.save(update_fields=['ai_explanation'])
+
+    fix_data = specialist_result.fix
+    if not fix_data:
+        return finding
+
+    verification = specialist_result.verification
+    verification_status = 'NOT_VERIFIED'
+    verification_reason = ''
+    if verification:
+        verification_status = 'PASSED' if verification.is_true_positive else 'FAILED'
+        verification_reason = verification.reasoning
+        if not verification.is_true_positive:
+            logger.warning(f"Fix verification failed for {finding.title}: {verification.reasoning}")
+
+    apply_fix(
+        finding_id=finding.id,
+        proposed_code=fix_data.fixed_code,
+        explanation=fix_data.explanation,
+        scope=fix_data.scope,
+        start_line=fix_data.start_line,
+        end_line=fix_data.end_line,
+        verification_status=verification_status,
+        verification_reason=verification_reason,
+    )
+    record_scan_event(
+        scan_job,
+        phase='persist',
+        event_type='fix',
+        title='Proposed fix saved',
+        detail=f"Stored a {fix_data.scope.lower()} fix for {finding.title}.",
+        payload={
+            'finding_id': finding.id,
+            'scope': fix_data.scope,
+            'start_line': fix_data.start_line,
+            'end_line': fix_data.end_line,
+            'verification_status': verification_status,
+        },
+    )
+    return finding

@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 @dataclass
 class MemoryEvent:
-    input_item: dict
     summary_line: str
+    evidence_excerpt: str
     token_estimate: int
 
 
@@ -25,14 +25,9 @@ class ScanMemoryManager:
     def record_tool_result(self, tool_name, arguments, call_id, result):
         result_payload = result if isinstance(result, dict) else {'value': result}
         output_text = json.dumps(result_payload, ensure_ascii=True)
-        output_item = {
-            'type': 'function_call_output',
-            'call_id': call_id,
-            'output': output_text,
-        }
         event = MemoryEvent(
-            input_item=output_item,
             summary_line=self._build_summary_line(tool_name, arguments, result_payload),
+            evidence_excerpt=self._build_evidence_excerpt(tool_name, result_payload),
             token_estimate=max(1, len(output_text) // 4),
         )
         self.total_calls += 1
@@ -42,17 +37,36 @@ class ScanMemoryManager:
         self._capture_paths(result_payload)
         self.recent_events.append(event)
         self._compact_if_needed()
-        return output_item
+        return {
+            'type': 'scan_memory_summary',
+            'call_id': call_id,
+            'output': event.summary_line,
+        }
 
     def build_input_items(self):
-        items = []
+        context = self.build_context_window()
+        return [{'role': 'user', 'content': context}] if context else []
+
+    def build_context_window(self):
+        chunks = []
         if self.summary_lines:
-            items.append({
-                'role': 'user',
-                'content': 'Summary of earlier tool results:\n' + '\n'.join(f'- {line}' for line in self.summary_lines[-20:]),
-            })
-        items.extend(event.input_item for event in self.recent_events)
-        return items
+            chunks.append(
+                'Compact summary of earlier tool results:\n'
+                + '\n'.join(f'- {line}' for line in self.summary_lines[-20:])
+            )
+        if self.recent_events:
+            recent_summaries = '\n'.join(
+                f'- {event.summary_line}' for event in self.recent_events[-10:]
+            )
+            chunks.append('Recent tool result summaries:\n' + recent_summaries)
+            excerpts = [
+                event.evidence_excerpt
+                for event in self.recent_events[-6:]
+                if event.evidence_excerpt
+            ]
+            if excerpts:
+                chunks.append('Bounded recent evidence excerpts:\n' + '\n\n'.join(excerpts))
+        return '\n\n'.join(chunks).strip()
 
     def build_investigation_summary(self, final_response_text=''):
         chunks = []
@@ -95,6 +109,35 @@ class ScanMemoryManager:
             end_line = result_payload.get('end_line', arguments.get('end_line', start_line))
             return f'Read {filepath}:{start_line}-{end_line}'
         return f'Used {tool_name}'
+
+    def _build_evidence_excerpt(self, tool_name, result_payload):
+        if result_payload.get('error'):
+            return ''
+        if tool_name == 'search_codebase':
+            lines = []
+            for item in result_payload.get('results', [])[:5]:
+                match = (item.get('match') or '').strip()
+                if match:
+                    match = match[:220]
+                lines.append(f"{item.get('path')}:{item.get('line_number')}: {match}")
+            return '\n'.join(lines)
+        if tool_name == 'read_file':
+            content = (result_payload.get('content') or '').strip()
+            if not content:
+                return ''
+            filepath = result_payload.get('filepath', '')
+            start_line = result_payload.get('start_line', 1)
+            end_line = result_payload.get('end_line', start_line)
+            if len(content) > 1200:
+                content = content[:1200] + '\n...[excerpt truncated]...'
+            return f'{filepath}:{start_line}-{end_line}\n{content}'
+        if tool_name == 'list_directory':
+            sample = ', '.join(
+                entry.get('path') or entry.get('name', '')
+                for entry in result_payload.get('entries', [])[:20]
+            )
+            return f"Directory sample: {sample}" if sample else ''
+        return ''
 
     def _capture_paths(self, result_payload):
         for entry in result_payload.get('entries', []):

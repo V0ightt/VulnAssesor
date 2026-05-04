@@ -7,6 +7,7 @@ from unittest import mock
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from .agent import (
     FixResult,
@@ -25,10 +26,11 @@ from .agents.specialists import (
     CommandInjectionSpecialistAgent,
     GenericSecuritySpecialistAgent,
 )
-from .models import Project, ProjectProgressEvent, SASTFix, SASTScanJob
+from .models import Project, ProjectProgressEvent, SASTFinding, SASTFix, SASTScanJob
 from .services import ProjectManager
 from .sast_tools import list_directory, read_file, search_codebase
 from .tasks import run_sast_scan
+from .inventory import build_repository_inventory
 from .llm import ToolCall, ToolResponse
 from .llm.anthropic_provider import AnthropicProvider
 from .llm.deepseek_provider import DeepSeekProvider
@@ -179,6 +181,50 @@ class ToolingTests(WorkspaceTestCase):
         returned_paths = {entry['path'] for entry in result['entries']}
         self.assertIn('app', returned_paths)
         self.assertNotIn('node_modules', returned_paths)
+
+    def test_list_directory_reports_truncation_at_configured_limit(self):
+        for index in range(5):
+            self.write_file(f'app/file_{index}.py', 'print("ok")\n')
+
+        with self.settings(SAST_SCAN_MAX_DIRECTORY_ENTRIES=2):
+            result = list_directory(self.project, 'app')
+
+        self.assertEqual(len(result['entries']), 2)
+        self.assertTrue(result['truncated'])
+
+    def test_read_file_rejects_files_over_configured_size(self):
+        self.write_file('app/large.py', 'x' * 80)
+
+        with self.settings(SAST_SCAN_MAX_FILE_BYTES=20):
+            with self.assertRaises(ValueError):
+                read_file(self.project, 'app/large.py')
+
+    def test_search_python_fallback_stops_after_result_limit(self):
+        for index in range(4):
+            self.write_file(f'app/hit_{index}.py', 'dangerous_call()\n')
+
+        with self.settings(SAST_SCAN_MAX_SEARCH_RESULTS=2):
+            with mock.patch('SAST.sast_tools.shutil.which', return_value=None):
+                result = search_codebase(self.project, 'dangerous_call', 'app')
+
+        self.assertEqual(len(result['results']), 2)
+        self.assertTrue(result['truncated'])
+
+    def test_repository_inventory_summarizes_files_entrypoints_and_sinks(self):
+        self.load_fixture_repo()
+
+        with mock.patch('SAST.inventory.search_codebase') as fake_search:
+            fake_search.return_value = {
+                'total_hits': 1,
+                'truncated': False,
+                'results': [{'path': 'app/views.py', 'line_number': 9, 'match': 'subprocess.run(...)'}],
+            }
+            inventory = build_repository_inventory(self.project)
+
+        self.assertGreater(inventory['file_count'], 0)
+        self.assertIn('Python', inventory['language_counts'])
+        self.assertIn('app/urls.py', inventory['entrypoint_candidates'])
+        self.assertIn('COMMAND_INJECTION', inventory['sink_candidates'])
 
 
 class MemoryManagerTests(TestCase):
@@ -368,7 +414,9 @@ class AgentLoopTests(WorkspaceTestCase):
         self.assertEqual(findings[0]['file_path'], 'app/views.py')
         self.assertEqual(agent.last_scan_metadata['tool_call_count'], 3)
         second_conversation = fake_provider.create_calls[1]['conversation']
-        self.assertTrue(any(item.get('type') == 'function_call_output' for item in second_conversation if isinstance(item, dict)))
+        conversation_text = str(second_conversation)
+        self.assertIn('bounded scan memory', conversation_text)
+        self.assertNotIn('function_call_output', conversation_text)
 
     def test_scan_project_does_not_inline_large_files_in_initial_prompt(self):
         self.write_file('large_module.py', ('SENTINEL_BLOCK\n' * 5000))
@@ -383,6 +431,34 @@ class AgentLoopTests(WorkspaceTestCase):
 
         initial_input = str(fake_provider.create_calls[0]['conversation'])
         self.assertNotIn('SENTINEL_BLOCK', initial_input)
+
+    def test_tool_loop_rebases_away_old_large_tool_outputs(self):
+        large_content = 'START\n' + ('A' * 2400) + '\nRAW_SENTINEL_END'
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call('call-1', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":200}')),
+                fake_tool_response(fake_tool_call('call-2', 'search_codebase', '{"query":"dangerous_call","directory":"app"}')),
+                fake_tool_response(output_text='No supported vulnerabilities found.'),
+            ],
+            parse_responses=[ScanResult(findings=[])],
+        )
+
+        with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
+            with mock.patch('SAST.agents.base.read_file', return_value={
+                'filepath': 'app/views.py',
+                'start_line': 1,
+                'end_line': 200,
+                'total_lines': 200,
+                'content': large_content,
+                'truncated': True,
+            }):
+                agent = SASTAgent(self.project)
+                agent.scan_project()
+
+        second_conversation = str(fake_provider.create_calls[1]['conversation'])
+        self.assertIn('bounded scan memory', second_conversation)
+        self.assertNotIn('function_call_output', second_conversation)
+        self.assertNotIn('RAW_SENTINEL_END', second_conversation)
 
     def test_scan_project_respects_cancellation_between_tool_turns(self):
         self.load_fixture_repo()
@@ -664,6 +740,51 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertEqual(fix.scope, 'SNIPPET')
         self.assertEqual(fix.start_line, 8)
         self.assertEqual(fix.end_line, 9)
+        self.assertEqual(fix.verification_status, 'PASSED')
+        self.assertEqual(scan_job.findings.first().confidence_score, 0.97)
+
+    def test_run_sast_scan_persists_each_specialist_before_scan_completion(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        second_surface = self.surface().model_copy(update={'surface_id': 'surface-2', 'title': 'Second surface'})
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(output_text='Potential surfaces found.'),
+                fake_tool_response(output_text='Confirmed first finding.'),
+                fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
+                fake_tool_response(output_text='The fix removes shell execution.'),
+                fake_tool_response(fake_tool_call('spec-2', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+                fake_tool_response(output_text='No finding on second surface.'),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface(), second_surface]),
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                self.verification(),
+                ScanResult(findings=[]),
+            ],
+        )
+
+        def assert_first_saved(project, file_path, start_line=1, end_line=None, max_lines=None, max_bytes=None):
+            self.assertEqual(scan_job.findings.count(), 1)
+            self.assertEqual(scan_job.status, 'SCANNING')
+            return {
+                'filepath': file_path,
+                'start_line': start_line,
+                'end_line': end_line,
+                'total_lines': 20,
+                'content': '',
+                'truncated': False,
+            }
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            with mock.patch('SAST.agents.base.read_file', side_effect=assert_first_saved):
+                result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'COMPLETED')
+        self.assertIn('completed', result.lower())
+        self.assertEqual(scan_job.findings.count(), 1)
 
     def test_run_sast_scan_records_missing_provider_key(self):
         self.load_fixture_repo()
@@ -738,3 +859,106 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertIn('cancelled', result.lower())
         self.assertEqual(scan_job.agent_run_metadata['stop_reason'], 'cancelled')
         self.assertEqual(scan_job.agent_run_metadata['specialists'][0]['surface_id'], 'surface-1')
+
+    def test_run_sast_scan_keeps_persisted_findings_after_mid_scan_cancel(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        second_surface = self.surface().model_copy(update={'surface_id': 'surface-2', 'title': 'Second surface'})
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(output_text='Potential surfaces found.'),
+                fake_tool_response(output_text='Confirmed first finding.'),
+                fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
+                fake_tool_response(output_text='The fix removes shell execution.'),
+                fake_tool_response(fake_tool_call('spec-2', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface(), second_surface]),
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                self.verification(),
+            ],
+        )
+
+        def cancel_after_first_saved(project, file_path, start_line=1, end_line=None, max_lines=None, max_bytes=None):
+            self.assertEqual(scan_job.findings.count(), 1)
+            scan_job.status = 'CANCELLING'
+            scan_job.save(update_fields=['status'])
+            return {
+                'filepath': file_path,
+                'start_line': start_line,
+                'end_line': end_line,
+                'total_lines': 20,
+                'content': '',
+                'truncated': False,
+            }
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            with mock.patch('SAST.agents.base.read_file', side_effect=cancel_after_first_saved):
+                result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'CANCELLED')
+        self.assertIn('cancelled', result.lower())
+        self.assertEqual(scan_job.findings.count(), 1)
+        self.assertEqual(SASTFix.objects.count(), 1)
+
+
+class SASTScanStatusViewTests(WorkspaceTestCase):
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(self.user)
+
+    def render_status(self, status, with_finding=False):
+        scan = SASTScanJob.objects.create(project=self.project, status=status)
+        if with_finding:
+            finding = SASTFinding.objects.create(
+                scan_job=scan,
+                file_path='app/views.py',
+                line_number=9,
+                severity='HIGH',
+                title='Command Injection',
+                description='User-controlled shell command execution.',
+                code_snippet='subprocess.run(user_cmd, shell=True)',
+                confidence_score=0.95,
+            )
+            SASTFix.objects.create(
+                finding=finding,
+                proposed_code='subprocess.run(args, shell=False)',
+                explanation='Avoid shell interpretation.',
+                scope='SNIPPET',
+                start_line=9,
+                end_line=9,
+                verification_status='PASSED',
+                verification_reason='The shell is no longer used.',
+            )
+        return self.client.get(reverse('sast_scan_status', args=[scan.id]))
+
+    def test_scan_status_view_renders_active_state_metrics(self):
+        response = self.render_status('SCANNING')
+
+        self.assertContains(response, 'Processing...')
+        self.assertContains(response, 'Tool Calls')
+        self.assertContains(response, 'Findings Saved')
+
+    def test_scan_status_view_renders_cancelling_state(self):
+        response = self.render_status('CANCELLING')
+
+        self.assertContains(response, 'Cleaning up...')
+        self.assertContains(response, 'Cancelling...')
+
+    def test_scan_status_view_renders_cancelled_with_findings(self):
+        response = self.render_status('CANCELLED', with_finding=True)
+
+        self.assertContains(response, 'Vulnerabilities Found (1)')
+        self.assertContains(response, 'Passed')
+
+    def test_scan_status_view_renders_completed_empty_state(self):
+        response = self.render_status('COMPLETED')
+
+        self.assertContains(response, 'No Vulnerabilities Found')
+
+    def test_scan_status_view_renders_failed_state(self):
+        response = self.render_status('FAILED')
+
+        self.assertContains(response, 'Scan Failed')

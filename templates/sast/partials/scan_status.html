@@ -1,49 +1,48 @@
 <div id="scan-status-container"
-     {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' %}
+     {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' or scan.status == 'CANCELLING' %}
      hx-get="{% url 'sast_scan_status' scan.id %}"
      hx-trigger="every 2s"
      hx-swap="outerHTML"
      {% endif %}
      x-data="{ filter: 'ALL' }">
 
-    <!-- Status Banner -->
-    <div style="margin-bottom: 20px; padding: 20px; background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; display: flex; justify-content: space-between; align-items: center;">
+    <div class="sast-status-banner status-{{ scan.status|lower }}">
         <div>
-            <h4 style="margin: 0; font-size: 1.1em;">
-                Status: 
-                <span style="
-                    {% if scan.status == 'COMPLETED' %}color: #3fb950;
-                    {% elif scan.status == 'FAILED' %}color: #f85149;
-                    {% elif scan.status == 'CANCELLED' %}color: #8b949e;
-                    {% else %}color: #d29922;{% endif %}
-                ">
-                    {{ scan.get_status_display }}
-                </span>
-            </h4>
-            <p style="margin: 5px 0 0 0; color: #8b949e; font-size: 0.9em;">
+            <h4>Status: <span>{{ scan.get_status_display }}</span></h4>
+            <p>
                 Started {{ scan.created_at|timesince }} ago
-                {% if scan.completed_at %} • Completed in {{ scan.completed_at|timeuntil:scan.created_at }}{% endif %}
+                {% if scan.completed_at %} | Completed {{ scan.completed_at|timesince }} ago{% endif %}
+                {% if scan.cancel_requested_at %} | Cancel requested {{ scan.cancel_requested_at|timesince }} ago{% endif %}
             </p>
         </div>
-        
+
         {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' %}
-        <div style="display: flex; align-items: center; color: #d29922;">
-            <span class="spinner-sm" style="margin-right: 10px;"></span>
-            <span>Processing...</span>
-        </div>
+        <div class="sast-processing"><span class="spinner-sm"></span><span>Processing...</span></div>
+        {% elif scan.status == 'CANCELLING' %}
+        <div class="sast-processing cancelling"><span class="spinner-sm"></span><span>Cleaning up...</span></div>
         {% endif %}
     </div>
 
-    {% include 'sast/partials/scan_activity.html' with scan_events=scan_events %}
+    <div class="sast-metrics-grid">
+        <div><span>Elapsed</span><strong>{{ scan_metrics.elapsed_seconds }}s</strong></div>
+        <div><span>Phase</span><strong>{{ scan_metrics.current_phase }}</strong></div>
+        <div><span>Surfaces</span><strong>{{ scan_metrics.reviewed_surfaces }}/{{ scan_metrics.total_surfaces|default:"?" }}</strong></div>
+        <div><span>Tool Calls</span><strong>{{ scan_metrics.tool_calls }}</strong></div>
+        <div><span>Findings Saved</span><strong>{{ scan_metrics.findings_saved }}</strong></div>
+        <div><span>Inventory Files</span><strong>{{ scan_metrics.inventory_file_count }}</strong></div>
+    </div>
 
-    <!-- Findings Section -->
+    <div class="sast-last-activity">
+        <span>Last activity</span>
+        <strong>{{ scan_metrics.last_activity }}</strong>
+        <em>{{ scan_metrics.last_activity_at|timesince }} ago</em>
+    </div>
+
     {% if scan.findings.exists %}
     <div class="findings-list">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h3 style="margin: 0; color: #c9d1d9;">Vulnerabilities Found ({{ scan.findings.count }})</h3>
-            
-            <!-- Filter Buttons -->
-            <div style="display: flex; gap: 5px;">
+        <div class="sast-findings-header">
+            <h3>Vulnerabilities Found ({{ scan.findings.count }})</h3>
+            <div class="sast-filter-row">
                 <button @click="filter = 'ALL'" :class="{ 'active': filter === 'ALL' }" class="filter-btn">All</button>
                 <button @click="filter = 'CRITICAL'" :class="{ 'active': filter === 'CRITICAL' }" class="filter-btn critical">Critical</button>
                 <button @click="filter = 'HIGH'" :class="{ 'active': filter === 'HIGH' }" class="filter-btn high">High</button>
@@ -51,146 +50,85 @@
                 <button @click="filter = 'LOW'" :class="{ 'active': filter === 'LOW' }" class="filter-btn low">Low</button>
             </div>
         </div>
-        
+
         {% for finding in scan.findings.all %}
-        <div class="finding-card" 
-             x-show="filter === 'ALL' || filter === '{{ finding.severity }}'"
-             style="background-color: #161b22; border: 1px solid #30363d; border-radius: 6px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            
-            <!-- Card Header -->
-            <div class="finding-header" style="padding: 15px; background-color: #21262d; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 15px;">
-                    <span style="
-                        padding: 4px 10px; border-radius: 20px; font-size: 0.85em; font-weight: bold; text-transform: uppercase;
-                        {% if finding.severity == 'CRITICAL' %}background-color: #f85149; color: white;
-                        {% elif finding.severity == 'HIGH' %}background-color: #d29922; color: white;
-                        {% elif finding.severity == 'MEDIUM' %}background-color: #db6d28; color: white;
-                        {% else %}background-color: #58a6ff; color: white;{% endif %}
-                    ">{{ finding.severity }}</span>
-                    <span style="font-weight: bold; font-size: 1.1em; color: #c9d1d9;">{{ finding.title }}</span>
+        <div class="finding-card" x-show="filter === 'ALL' || filter === '{{ finding.severity }}'">
+            <div class="finding-header">
+                <div>
+                    <span class="severity-badge sev-{{ finding.severity|lower }}">{{ finding.severity }}</span>
+                    <strong>{{ finding.title }}</strong>
                 </div>
-                <div style="text-align: right;">
-                    <div style="color: #8b949e; font-family: monospace; font-size: 0.9em;">
-                        <i style="color: #58a6ff;">📄</i> {{ finding.file_path }} : <span style="color: #f85149; font-weight: bold;">Line {{ finding.line_number }}</span>
-                    </div>
-                </div>
+                <code>{{ finding.file_path }}:{{ finding.line_number }}</code>
             </div>
-            
-            <!-- Card Body -->
-            <div class="finding-body" style="padding: 20px;">
-                <p style="margin-top: 0; color: #c9d1d9; line-height: 1.5;">{{ finding.description }}</p>
-                
-                <!-- Vulnerable Code Snippet -->
+
+            <div class="finding-body">
+                <p>{{ finding.description }}</p>
+                {% if finding.confidence_score %}
+                <div class="sast-confidence">Confidence: {{ finding.confidence_score }}</div>
+                {% endif %}
+
                 {% if finding.code_snippet %}
-                <div style="margin: 15px 0;">
-                    <div style="color: #f85149; font-size: 0.85em; font-weight: bold; margin-bottom: 5px;">❌ VULNERABLE CODE:</div>
-                    <div style="background-color: #0d1117; padding: 15px; border-radius: 6px; border: 1px solid #f85149; overflow-x: auto;">
-                        <code style="font-family: 'Courier New', monospace; color: #c9d1d9; white-space: pre-wrap;">{{ finding.code_snippet }}</code>
-                    </div>
+                <div class="sast-code-block">
+                    <div>Vulnerable Code</div>
+                    <pre><code>{{ finding.code_snippet }}</code></pre>
                 </div>
                 {% endif %}
 
-                <!-- AI Analysis -->
                 {% if finding.ai_explanation %}
-                <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #30363d;">
-                    <strong style="color: #58a6ff; display: flex; align-items: center; gap: 5px;">
-                        AI Analysis
-                    </strong>
-                    <p style="margin-top: 10px; color: #8b949e; line-height: 1.6;">{{ finding.ai_explanation }}</p>
+                <div class="sast-analysis">
+                    <strong>AI Analysis</strong>
+                    <p>{{ finding.ai_explanation }}</p>
                 </div>
                 {% endif %}
 
-                <!-- Suggested Fix -->
                 {% if finding.fix %}
-                <div style="margin-top: 20px; padding: 15px; background-color: rgba(63, 185, 80, 0.05); border: 1px solid rgba(63, 185, 80, 0.3); border-radius: 6px;">
-                    <strong style="color: #3fb950; display: flex; align-items: center; gap: 5px; margin-bottom: 10px;">
-                        Suggested Fix
-                    </strong>
-                    <p style="margin: 0 0 15px 0; font-size: 0.95em; color: #c9d1d9;">{{ finding.fix.explanation }}</p>
-                    
-                    <div style="background-color: #0d1117; border-radius: 6px; border: 1px solid #30363d; overflow: hidden;">
-                        <div style="padding: 8px 15px; background-color: #21262d; border-bottom: 1px solid #30363d; font-size: 0.85em; color: #8b949e;">
+                <details class="sast-fix-panel">
+                    <summary>
+                        <span>Suggested Fix</span>
+                        <span class="verification verification-{{ finding.fix.verification_status|lower }}">
+                            {{ finding.fix.get_verification_status_display }}
+                        </span>
+                    </summary>
+                    <p>{{ finding.fix.explanation }}</p>
+                    {% if finding.fix.verification_reason %}
+                    <div class="sast-verification-reason">{{ finding.fix.verification_reason }}</div>
+                    {% endif %}
+                    <div class="sast-code-block fix">
+                        <div>
                             Proposed Change
                             {% if finding.fix.scope == 'SNIPPET' %}
-                                <span style="margin-left: 8px; color: #3fb950;">{{ finding.fix.start_line }}-{{ finding.fix.end_line }}</span>
+                                {{ finding.fix.start_line }}-{{ finding.fix.end_line }}
                             {% else %}
-                                <span style="margin-left: 8px; color: #58a6ff;">Full File Replacement</span>
+                                Full file replacement
                             {% endif %}
                         </div>
-                        <pre style="margin: 0; padding: 15px; overflow-x: auto; color: #3fb950;"><code style="font-family: 'Courier New', monospace;">{{ finding.fix.proposed_code }}</code></pre>
+                        <pre><code>{{ finding.fix.proposed_code }}</code></pre>
                     </div>
-                </div>
+                </details>
                 {% endif %}
             </div>
         </div>
         {% endfor %}
     </div>
     {% elif scan.status == 'COMPLETED' %}
-    <div style="padding: 60px; text-align: center; background-color: #161b22; border: 1px solid #30363d; border-radius: 6px;">
-        <div style="font-size: 3em; margin-bottom: 20px;">✅</div>
-        <h3 style="color: #c9d1d9; margin-bottom: 10px;">No Vulnerabilities Found</h3>
-        <p style="color: #8b949e;">Great job! Your code appears to be secure based on our analysis.</p>
+    <div class="sast-empty-state">
+        <h3>No Vulnerabilities Found</h3>
+        <p>The scan completed without persisted findings.</p>
     </div>
     {% elif scan.status == 'CANCELLED' %}
-    <div style="padding: 60px; text-align: center; background-color: #161b22; border: 1px solid #30363d; border-radius: 6px;">
-        <div style="font-size: 3em; margin-bottom: 20px;">🛑</div>
-        <h3 style="color: #c9d1d9; margin-bottom: 10px;">Scan Cancelled</h3>
-        <p style="color: #8b949e;">This scan was stopped by the user.</p>
+    <div class="sast-empty-state">
+        <h3>Scan Cancelled</h3>
+        <p>This scan was stopped after worker cleanup.</p>
     </div>
     {% elif scan.status == 'FAILED' %}
-    <div style="padding: 60px; text-align: center; background-color: #161b22; border: 1px solid #30363d; border-radius: 6px;">
-        <div style="font-size: 3em; margin-bottom: 20px;">⚠️</div>
-        <h3 style="color: #c9d1d9; margin-bottom: 10px;">Scan Failed</h3>
-        <p style="color: #8b949e;">Something went wrong during the scan. Please try again.</p>
+    <div class="sast-empty-state failed">
+        <h3>Scan Failed</h3>
+        <p>Something went wrong during the scan. Check the activity log for the failure detail.</p>
     </div>
     {% endif %}
 
-    <style>
-        .filter-btn {
-            background-color: transparent;
-            border: 1px solid #30363d;
-            color: #8b949e;
-            padding: 5px 12px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 0.85em;
-            transition: all 0.2s;
-        }
-        .filter-btn:hover {
-            background-color: #21262d;
-            color: #c9d1d9;
-        }
-        .filter-btn.active {
-            background-color: #58a6ff;
-            color: white;
-            border-color: #58a6ff;
-        }
-        .filter-btn.critical.active { background-color: #f85149; border-color: #f85149; }
-        .filter-btn.high.active { background-color: #d29922; border-color: #d29922; }
-        .filter-btn.medium.active { background-color: #db6d28; border-color: #db6d28; }
-        .filter-btn.low.active { background-color: #58a6ff; border-color: #58a6ff; }
-    </style>
+    {% include 'sast/partials/scan_activity.html' with scan_events=scan_events %}
 </div>
-
-<style>
-    .filter-btn {
-        background-color: #21262d;
-        border: 1px solid #30363d;
-        color: #c9d1d9;
-        padding: 4px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 0.85em;
-        transition: all 0.2s;
-    }
-    .filter-btn:hover { background-color: #30363d; }
-    .filter-btn.active { background-color: #58a6ff; color: white; border-color: #58a6ff; }
-    
-    .filter-btn.critical.active { background-color: #f85149; border-color: #f85149; }
-    .filter-btn.high.active { background-color: #d29922; border-color: #d29922; }
-    .filter-btn.medium.active { background-color: #db6d28; border-color: #db6d28; }
-    .filter-btn.low.active { background-color: #58a6ff; border-color: #58a6ff; }
-</style>
 
 <div id="scan-controls" hx-swap-oob="true" style="display: flex; gap: 10px;">
     {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' %}
@@ -200,6 +138,10 @@
                 Stop Scan
             </button>
         </form>
+    {% elif scan.status == 'CANCELLING' %}
+        <button type="button" style="background-color: #30363d; color: #d29922; border: none; padding: 10px 20px; border-radius: 6px; cursor: wait; font-weight: 600;" disabled>
+            Cancelling...
+        </button>
     {% else %}
         <form method="post" action="{% url 'start_scan' scan.project.id %}">
             {% csrf_token %}

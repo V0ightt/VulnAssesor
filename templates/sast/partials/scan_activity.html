@@ -4,7 +4,7 @@
             <h3>Agent Activity</h3>
             <p>Safe live view of phases, tool calls, evidence paths, and outcomes.</p>
         </div>
-        {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' %}
+        {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' or scan.status == 'CANCELLING' %}
         <span class="scan-activity-live"><span></span> Live</span>
         {% endif %}
     </div>

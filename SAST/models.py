@@ -30,6 +30,7 @@ class SASTScanJob(models.Model):
         ('PENDING', 'Pending'),
         ('CLONING', 'Cloning'),
         ('SCANNING', 'Scanning'),
+        ('CANCELLING', 'Cancelling'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
         ('CANCELLED', 'Cancelled'),
@@ -44,9 +45,25 @@ class SASTScanJob(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(blank=True, null=True)
+    celery_task_id = models.CharField(max_length=255, blank=True, null=True)
+    cancel_requested_at = models.DateTimeField(blank=True, null=True)
+    cancelled_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name='cancelled_sast_scans',
+    )
     commit_hash = models.CharField(max_length=40, blank=True, null=True)
     scan_type = models.CharField(max_length=20, choices=SCAN_TYPE_CHOICES, default='FULL')
     agent_run_metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['project', 'status', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['celery_task_id']),
+        ]
 
     def __str__(self):
         return f"{self.project.name} - {self.get_scan_type_display()} ({self.status})"
@@ -70,6 +87,15 @@ class SASTFinding(models.Model):
     ai_explanation = models.TextField(blank=True, null=True)
     ai_fix_code = models.TextField(blank=True, null=True)
     is_fixed = models.BooleanField(default=False)
+    confidence_score = models.FloatField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['scan_job', 'severity']),
+            models.Index(fields=['scan_job', '-created_at']),
+            models.Index(fields=['severity', '-created_at']),
+        ]
 
     def __str__(self):
         return f"{self.title} - {self.file_path}:{self.line_number}"
@@ -79,6 +105,12 @@ class SASTFix(models.Model):
         ('PENDING', 'Pending'),
         ('ACCEPTED', 'Accepted'),
         ('REJECTED', 'Rejected'),
+    ]
+
+    VERIFICATION_CHOICES = [
+        ('NOT_VERIFIED', 'Not Verified'),
+        ('PASSED', 'Passed'),
+        ('FAILED', 'Failed'),
     ]
 
     SCOPE_CHOICES = [
@@ -93,7 +125,19 @@ class SASTFix(models.Model):
     scope = models.CharField(max_length=20, choices=SCOPE_CHOICES, default='SNIPPET')
     start_line = models.IntegerField(default=1)
     end_line = models.IntegerField(default=1)
+    verification_status = models.CharField(
+        max_length=20,
+        choices=VERIFICATION_CHOICES,
+        default='NOT_VERIFIED',
+    )
+    verification_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['verification_status', '-created_at']),
+        ]
 
     def __str__(self):
         return f"Fix for {self.finding.title}"

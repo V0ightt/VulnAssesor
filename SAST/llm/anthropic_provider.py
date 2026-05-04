@@ -64,6 +64,20 @@ class AnthropicProvider(StructuredOutputMixin):
             ],
         })
 
+    def rebase_conversation(self, conversation, system_prompt, user_prompt, memory):
+        context_window = memory.build_context_window()
+        conversation['system'] = system_prompt
+        conversation['messages'] = [{'role': 'user', 'content': user_prompt}]
+        if context_window:
+            conversation['messages'].append({
+                'role': 'user',
+                'content': (
+                    'Use this bounded scan memory instead of earlier raw tool outputs. '
+                    'Do not assume evidence beyond these summaries and excerpts.\n\n'
+                    f'{context_window}'
+                ),
+            })
+
     def parse_structured_output(self, model, schema, system_prompt, user_prompt):
         def call_once(current_system_prompt, current_user_prompt):
             response = self.client.messages.create(

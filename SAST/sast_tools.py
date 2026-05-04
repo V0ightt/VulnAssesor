@@ -22,7 +22,16 @@ def modify_code(project, file_path, new_content):
     
     return True
 
-def report_vulnerability(scan_job, file_path, line_number, severity, title, description, code_snippet):
+def report_vulnerability(
+    scan_job,
+    file_path,
+    line_number,
+    severity,
+    title,
+    description,
+    code_snippet,
+    confidence_score=None,
+):
     """Creates a new SASTFinding."""
     finding = SASTFinding.objects.create(
         scan_job=scan_job,
@@ -31,7 +40,8 @@ def report_vulnerability(scan_job, file_path, line_number, severity, title, desc
         severity=severity,
         title=title,
         description=description,
-        code_snippet=code_snippet
+        code_snippet=code_snippet,
+        confidence_score=confidence_score,
     )
     return finding
 
@@ -50,7 +60,16 @@ def get_vulnerability_context(finding_id):
     context_lines = lines[start_line:end_line]
     return "\n".join(context_lines)
 
-def apply_fix(finding_id, proposed_code, explanation, scope='SNIPPET', start_line=1, end_line=1):
+def apply_fix(
+    finding_id,
+    proposed_code,
+    explanation,
+    scope='SNIPPET',
+    start_line=1,
+    end_line=1,
+    verification_status='NOT_VERIFIED',
+    verification_reason='',
+):
     """Creates a SASTFix for a finding."""
     finding = SASTFinding.objects.get(id=finding_id)
     fix = SASTFix.objects.create(
@@ -60,6 +79,8 @@ def apply_fix(finding_id, proposed_code, explanation, scope='SNIPPET', start_lin
         scope=scope,
         start_line=start_line,
         end_line=end_line,
+        verification_status=verification_status,
+        verification_reason=verification_reason,
     )
     return fix
 
@@ -81,7 +102,12 @@ def list_project_files(project):
 def read_file(project, file_path, start_line=1, end_line=None, max_lines=None, max_bytes=None):
     """Reads a file from the project workspace."""
     manager = ProjectManager(project)
-    normalized_path = manager.get_relative_path(manager.resolve_path(file_path))
+    full_path = manager.resolve_path(file_path)
+    normalized_path = manager.get_relative_path(full_path)
+    if not _is_allowed_text_file(full_path):
+        raise ValueError("File type is not allowed for SAST reads.")
+    if full_path.stat().st_size > settings.SAST_SCAN_MAX_FILE_BYTES:
+        raise ValueError("File exceeds the configured SAST maximum file size.")
     window = manager.get_file_lines(file_path, start_line=start_line, end_line=end_line, max_lines=max_lines)
     content = window['content']
     truncated = window['truncated']
@@ -129,7 +155,7 @@ def list_directory(project, directory=''):
     all_entries = manager.get_directory_structure(
         directory,
         ignored_directories=get_ignored_directories(),
-        max_entries=None,
+        max_entries=settings.SAST_SCAN_MAX_DIRECTORY_ENTRIES + 1,
     )
     entries = all_entries[:settings.SAST_SCAN_MAX_DIRECTORY_ENTRIES]
     return {
@@ -146,7 +172,7 @@ def list_directory(project, directory=''):
     }
 
 
-def search_codebase(project, query, directory=''):
+def search_codebase(project, query, directory='', max_results=None):
     manager = ProjectManager(project)
     search_root = manager.resolve_path(directory)
     if not search_root.exists() or not search_root.is_dir():
@@ -154,10 +180,19 @@ def search_codebase(project, query, directory=''):
 
     if shutil.which('rg'):
         try:
-            return _search_with_ripgrep(manager, query, search_root)
+            return _search_with_ripgrep(manager, query, search_root, max_results=max_results)
+        except subprocess.TimeoutExpired:
+            return {
+                'query': query,
+                'directory': manager.get_relative_path(search_root) if search_root != manager.workspace_root.resolve() else '',
+                'total_hits': 0,
+                'truncated': True,
+                'results': [],
+                'error': 'ripgrep search timed out',
+            }
         except Exception:
-            return _search_with_python(manager, query, search_root)
-    return _search_with_python(manager, query, search_root)
+            return _search_with_python(manager, query, search_root, max_results=max_results)
+    return _search_with_python(manager, query, search_root, max_results=max_results)
 
 
 def _normalize_query(query):
@@ -176,11 +211,15 @@ def _truncate_preview(text, length=240):
 
 
 def _iter_search_globs():
+    for extension in get_allowed_extensions():
+        yield f'*{extension}'
+    for filename in ('.env', 'Dockerfile', 'Makefile', 'README', 'README.md', 'agents.md'):
+        yield filename
     for ignored in get_ignored_directories():
         yield f'!{ignored}/**'
 
 
-def _search_with_ripgrep(manager, query, search_root):
+def _search_with_ripgrep(manager, query, search_root, max_results=None):
     normalized_query = _normalize_query(query)
     command = [
         'rg',
@@ -189,6 +228,8 @@ def _search_with_ripgrep(manager, query, search_root):
         '--hidden',
         '-e',
         normalized_query,
+        '--max-filesize',
+        str(settings.SAST_SCAN_MAX_FILE_BYTES),
         '.',
     ]
     for glob in _iter_search_globs():
@@ -202,6 +243,7 @@ def _search_with_ripgrep(manager, query, search_root):
         encoding='utf-8',
         errors='ignore',
         check=False,
+        timeout=settings.SAST_SCAN_RIPGREP_TIMEOUT,
     )
 
     if completed.returncode not in (0, 1):
@@ -209,7 +251,7 @@ def _search_with_ripgrep(manager, query, search_root):
 
     results = []
     total_hits = 0
-    max_results = settings.SAST_SCAN_MAX_SEARCH_RESULTS
+    max_results = max_results or settings.SAST_SCAN_MAX_SEARCH_RESULTS
 
     for line in completed.stdout.splitlines():
         payload = json.loads(line)
@@ -218,7 +260,7 @@ def _search_with_ripgrep(manager, query, search_root):
 
         total_hits += 1
         if len(results) >= max_results:
-            continue
+            break
 
         data = payload['data']
         relative_path = Path(data['path']['text']).as_posix()
@@ -233,15 +275,15 @@ def _search_with_ripgrep(manager, query, search_root):
         'query': query,
         'directory': manager.get_relative_path(search_root) if search_root != manager.workspace_root.resolve() else '',
         'total_hits': total_hits,
-        'truncated': total_hits > max_results,
+        'truncated': total_hits > max_results or len(results) >= max_results,
         'results': results,
     }
 
 
-def _search_with_python(manager, query, search_root):
+def _search_with_python(manager, query, search_root, max_results=None):
     normalized_query = _normalize_query(query)
     pattern = re.compile(normalized_query)
-    max_results = settings.SAST_SCAN_MAX_SEARCH_RESULTS
+    max_results = max_results or settings.SAST_SCAN_MAX_SEARCH_RESULTS
     results = []
     total_hits = 0
     ignored = set(get_ignored_directories())
@@ -251,6 +293,11 @@ def _search_with_python(manager, query, search_root):
         for filename in filenames:
             file_path = Path(root) / filename
             if not _is_allowed_text_file(file_path):
+                continue
+            try:
+                if file_path.stat().st_size > settings.SAST_SCAN_MAX_FILE_BYTES:
+                    continue
+            except OSError:
                 continue
             try:
                 with file_path.open('r', encoding='utf-8', errors='ignore') as handle:
@@ -264,6 +311,14 @@ def _search_with_python(manager, query, search_root):
                                 'line_number': line_number,
                                 'match': _truncate_preview(line),
                             })
+                        else:
+                            return {
+                                'query': query,
+                                'directory': manager.get_relative_path(search_root) if search_root != manager.workspace_root.resolve() else '',
+                                'total_hits': total_hits,
+                                'truncated': True,
+                                'results': results,
+                            }
             except OSError:
                 continue
 

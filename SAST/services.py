@@ -155,11 +155,11 @@ class ProjectManager:
                 'path': self.get_relative_path(entry),
                 'is_dir': is_dir
             })
+            if max_entries is not None and len(items) >= max_entries:
+                break
 
         # Sort directories first, then files
         items.sort(key=lambda x: (not x['is_dir'], x['name']))
-        if max_entries is not None:
-            items = items[:max_entries]
         return items
 
     def iter_workspace_files(self, ignored_directories=None, allowed_extensions=None):

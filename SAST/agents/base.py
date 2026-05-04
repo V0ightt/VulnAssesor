@@ -164,6 +164,7 @@ class BaseToolCallingAgent:
 
                 if tool_results:
                     self.provider.append_tool_results(conversation, tool_results)
+                    self._rebase_conversation(conversation, task_prompt, memory)
 
                 if stop_reason == 'tool_budget_exhausted':
                     break
@@ -222,7 +223,7 @@ class BaseToolCallingAgent:
         if not self.scan_job:
             return
         self.scan_job.refresh_from_db(fields=['status'])
-        if self.scan_job.status == 'CANCELLED':
+        if self.scan_job.status in ('CANCELLING', 'CANCELLED'):
             raise ScanCancelledError(f'Scan {self.scan_job.id} cancelled.')
 
     ensure_scan_active = _ensure_scan_active
@@ -263,3 +264,27 @@ class BaseToolCallingAgent:
                 f"{summary.get('start_line', 1)}-{summary.get('end_line', summary.get('start_line', 1))}"
             )
         return f'Executed {tool_name}'
+
+    def _rebase_conversation(self, conversation, task_prompt, memory):
+        if hasattr(self.provider, 'rebase_conversation'):
+            self.provider.rebase_conversation(conversation, self.system_context, task_prompt, memory)
+            return
+
+        context_window = memory.build_context_window()
+        bounded_memory = (
+            'Use this bounded scan memory instead of earlier raw tool outputs. '
+            'Do not assume evidence beyond these summaries and excerpts.\n\n'
+            f'{context_window}'
+        )
+        if isinstance(conversation, list):
+            conversation[:] = [
+                {'role': 'system', 'content': self.system_context},
+                {'role': 'user', 'content': task_prompt},
+            ]
+            if context_window:
+                conversation.append({'role': 'user', 'content': bounded_memory})
+        elif isinstance(conversation, dict) and 'messages' in conversation:
+            conversation['system'] = self.system_context
+            conversation['messages'] = [{'role': 'user', 'content': task_prompt}]
+            if context_window:
+                conversation['messages'].append({'role': 'user', 'content': bounded_memory})

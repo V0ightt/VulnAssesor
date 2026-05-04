@@ -1,6 +1,6 @@
 # VulnAssesor Project Specification
 
-- **Last Updated:** April 29, 2026
+- **Last Updated:** May 4, 2026
 - **Current State:** Working Django 5.2 application with Nuclei DAST and configurable AI-backed multi-agent SAST
 - **Operational Mode:** Development-oriented stack with background workers and live HTMX updates
 
@@ -61,6 +61,10 @@ This document is the implementation reference for the current repository. It sho
 - `SAST_SCAN_MAX_READ_LINES`
 - `SAST_SCAN_MAX_DIRECTORY_ENTRIES`
 - `SAST_SCAN_MAX_TOOL_RESULT_BYTES`
+- `SAST_SCAN_MAX_FILE_BYTES`
+- `SAST_SCAN_RIPGREP_TIMEOUT`
+- `SAST_SCAN_INVENTORY_MAX_FILES`
+- `SAST_SCAN_MAX_SINK_CANDIDATES`
 - `SAST_SCAN_SOFT_CONTEXT_TOKENS`
 - `SAST_SCAN_HARD_CONTEXT_TOKENS`
 
@@ -72,6 +76,7 @@ This document is the implementation reference for the current repository. It sho
 - `Dashboard/` - authentication, website CRUD, Nuclei template CRUD, DAST scan orchestration, Nuclei configuration, and helper endpoints
 - `SAST/` - project ingestion, repository exploration, SAST scans, fix generation, and workspace services
 - `SAST/agents/` - orchestrator, specialist agents, structured schemas, memory aggregation, and registry dispatch
+- `SAST/inventory.py` - deterministic pre-scan repository inventory for large-repo routing context
 - `templates/` - Django UI templates and HTMX partials
 - `static/` - CSS and client assets
 - `nuclei-templates/` - bundled Nuclei YAML templates that can be loaded into the database
@@ -340,6 +345,9 @@ Project statuses:
 - `status`
 - `created_at`
 - `completed_at`
+- `celery_task_id`
+- `cancel_requested_at`
+- `cancelled_by`
 - `commit_hash`
 - `scan_type`
 - `agent_run_metadata`
@@ -348,6 +356,7 @@ Scan statuses:
 - `PENDING`
 - `CLONING`
 - `SCANNING`
+- `CANCELLING`
 - `COMPLETED`
 - `FAILED`
 - `CANCELLED`
@@ -355,6 +364,11 @@ Scan statuses:
 Scan types:
 - `FULL`
 - `INCREMENTAL`
+
+Indexes:
+- `project` plus `status` plus newest `created_at`
+- `status` plus newest `created_at`
+- `celery_task_id`
 
 #### `SASTFinding`
 - `scan_job`
@@ -367,6 +381,8 @@ Scan types:
 - `ai_explanation`
 - `ai_fix_code`
 - `is_fixed`
+- `confidence_score`
+- `created_at`
 
 Severity values:
 - `CRITICAL`
@@ -377,6 +393,11 @@ Severity values:
 
 `ai_fix_code` and `is_fixed` are still legacy fields in the model.
 
+Indexes:
+- `scan_job` plus `severity`
+- `scan_job` plus newest `created_at`
+- `severity` plus newest `created_at`
+
 #### `SASTFix`
 - `finding` one-to-one relation
 - `proposed_code`
@@ -385,6 +406,8 @@ Severity values:
 - `scope`
 - `start_line`
 - `end_line`
+- `verification_status`
+- `verification_reason`
 - `created_at`
 
 Status values:
@@ -395,6 +418,15 @@ Status values:
 Scope values:
 - `SNIPPET`
 - `FILE`
+
+Verification status values:
+- `NOT_VERIFIED`
+- `PASSED`
+- `FAILED`
+
+Indexes:
+- `status` plus newest `created_at`
+- `verification_status` plus newest `created_at`
 
 #### `ProjectProgressEvent`
 Bounded, safe live progress events for SAST project ingestion and SAST scans.
@@ -449,19 +481,20 @@ When a scan starts, `run_sast_scan`:
 3. Sets the scan to `SCANNING`.
 4. Captures the repository head commit if the project is a Git checkout.
 5. Instantiates `SASTScanOrchestrator`, which loads `AIConfig` once and builds one provider.
-6. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces.
-7. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
-8. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
-9. Emits safe progress events for provider setup, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, completion, failure, and cancellation.
-10. Stores aggregate orchestrator and specialist metadata in `agent_run_metadata`.
-11. Persists `SASTFinding` rows through `report_vulnerability`.
-12. Saves proposed fixes through `apply_fix(...)` as `SASTFix` rows.
+6. Builds a deterministic repository inventory with file/language counts, top-level structure, entrypoint candidates, and vulnerability sink candidates from bounded searches.
+7. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces, using the inventory only as routing context.
+8. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
+9. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
+10. Persists each specialist result immediately after its fix and verification are ready.
+11. Emits safe progress events for provider setup, inventory, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, completion, failure, and cancellation.
+12. Stores running and final aggregate orchestrator, specialist, inventory, surface, and tool metadata in `agent_run_metadata`.
 13. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
 
 Cancellation behavior:
-- `cancel_scan` marks an active scan as `CANCELLED`.
+- `cancel_scan` marks an active scan as `CANCELLING`, stores `cancel_requested_at` and `cancelled_by`, and keeps polling while the worker cleans up.
+- The worker marks the scan `CANCELLED` only after the active agent loop stops and already persisted findings/fixes remain visible.
 - `cancel_ingestion` revokes the ingestion task and marks the project `CANCELLED`.
-- `BaseToolCallingAgent._ensure_scan_active()` raises a dedicated cancellation exception when the active scan job flips to `CANCELLED`.
+- `BaseToolCallingAgent._ensure_scan_active()` raises a dedicated cancellation exception when the active scan job flips to `CANCELLING` or `CANCELLED`.
 
 ### 6.4 Project manager and workspace safety
 
@@ -495,16 +528,17 @@ Functions:
 - `list_directory(project, directory='')`
 - `search_codebase(project, query, directory='')`
 - `read_file(project, file_path, start_line=1, end_line=None, max_lines=None, max_bytes=None)`
-- `report_vulnerability(scan_job, file_path, line_number, severity, title, description, code_snippet)`
-- `apply_fix(finding_id, proposed_code, explanation, scope='SNIPPET', start_line=1, end_line=1)`
+- `report_vulnerability(scan_job, file_path, line_number, severity, title, description, code_snippet, confidence_score=None)`
+- `apply_fix(finding_id, proposed_code, explanation, scope='SNIPPET', start_line=1, end_line=1, verification_status='NOT_VERIFIED', verification_reason='')`
 - `modify_code(project, file_path, new_content)`
 - `push_fixes(project, commit_message='Applied SAST fixes')`
 - `get_vulnerability_context(finding_id)`
 - `list_project_files(project)`
 
 Behavior notes:
-- `search_codebase()` uses ripgrep when available and falls back to Python regex search otherwise.
-- `read_file()` clamps line ranges and byte size to keep model inputs bounded.
+- `list_directory()` stops after the configured entry limit and reports truncation.
+- `search_codebase()` uses ripgrep when available, applies ignored directories and allowed extensions, enforces a timeout and result limit, and falls back to Python regex search otherwise.
+- `read_file()` clamps line ranges and byte size to keep model inputs bounded, and rejects disallowed extensions or oversized files.
 - The allowed file list is intentionally broad and includes common code, config, and shell files.
 - `modify_code()` and `push_fixes()` exist as phase-5 scaffolding and are not yet wired into the main workflow.
 
@@ -514,11 +548,13 @@ Behavior notes:
 
 Core characteristics:
 - `SASTScanOrchestrator` runs inside the existing `run_sast_scan` Celery task.
+- The orchestrator starts with a deterministic inventory phase before AI surface discovery.
 - `OrchestratorAgent` performs broad repository exploration and returns potential `VulnerabilitySurface` objects only.
 - `SpecialistRegistry` maps vulnerability types to specialist classes and falls back to `GenericSecuritySpecialistAgent`.
 - Specialists run sequentially for v1; Celery fan-out is intentionally deferred.
-- Agents return structured data only. `run_sast_scan` remains the persistence boundary for findings and fixes.
+- Agents return structured data only. `run_sast_scan` remains the persistence boundary, but each specialist result is saved immediately after fix generation and verification.
 - One provider is built from `AIConfig` per scan and passed to each agent; each agent starts its own conversation.
+- Provider conversations are rebased after tool turns onto the task prompt, compact summaries, and bounded recent evidence excerpts so older raw tool outputs are not repeatedly resent.
 - It loads the target project's `agents.md`, `AGENTS.md`, and `README.md` into the system context when available.
 - It does not assume repository contents that have not been discovered through tool calls.
 - It focuses on exploitable vulnerabilities only, not style warnings.
@@ -569,11 +605,11 @@ Structured output models:
 Supporting components:
 - `BaseToolCallingAgent` owns project context loading, tool definitions, tool dispatch, structured parsing, and cancellation checks.
 - `BaseToolCallingAgent` emits safe progress events for tool calls without persisting raw file contents or private reasoning.
-- `ScanMemoryManager` tracks explored paths, tool counts, truncation, and compacts older tool output.
+- `ScanMemoryManager` tracks explored paths, tool counts, truncation, compact summaries, and bounded recent evidence excerpts.
 - `aggregate_scan_metadata()` preserves legacy top-level metadata keys and adds nested `orchestrator` and `specialists` metadata.
 - `ExplorationResult` wraps the raw investigation transcript and metadata.
 - `ScanCancelledError` is raised when the active scan is cancelled mid-run.
-- `SAST/llm/` contains provider adapters and the provider registry.
+- `SAST/llm/` contains provider adapters, provider conversation rebasing hooks, and the provider registry.
 
 Implementation note:
 - This is a repository-exploration pipeline, not a simple per-file loop. The orchestrator decides which surfaces merit deeper review, and specialists convert gathered evidence into confirmed findings, proposed fixes, and verification results.
@@ -593,8 +629,9 @@ Current templates and partials:
 
 Important UI behavior:
 - `project_detail` auto-refreshes the outer content while ingestion is in progress.
-- `scan_status` polls every 2 seconds for active scans.
-- The project detail view shows scan controls, current scan status, safe live scan activity, ingestion activity, findings, fixes, and read-only project context.
+- `scan_status` polls every 2 seconds for active and cancelling scans.
+- The project detail view shows scan controls, current scan status, elapsed time, current phase, reviewed/total surfaces, tool calls, findings saved, last activity, cancellation state, safe live scan activity, ingestion activity, findings, fixes, and read-only project context.
+- Findings render as soon as they are persisted; proposed fixes are collapsed by default and show explicit verification status and reason.
 - The file explorer and viewer are implemented as read-only partial endpoints for repository navigation and syntax-highlighted code viewing.
 - Pygments uses the Monokai theme for code highlighting.
 
@@ -645,8 +682,8 @@ Behavior notes:
 
 Current test coverage is uneven:
 - `Dashboard/tests.py` covers AI configuration and live progress event basics, but DAST behavior still needs broader coverage.
-- `SAST/tests.py` contains meaningful coverage for the repository tools, memory manager, orchestrator, specialist registry, specialist fix flow, cancellation behavior, and fix persistence.
-- The SAST tests also use fakes to verify response replay, structured output, provider routing, metadata aggregation, tool-loop behavior, and safe progress events.
+- `SAST/tests.py` contains meaningful coverage for the repository tools, memory manager, inventory summaries, orchestrator, specialist registry, specialist fix flow, cancellation behavior, streaming fix persistence, and scan status UI states.
+- The SAST tests also use fakes to verify bounded context rebasing, structured output, provider routing, metadata aggregation, tool-loop behavior, and safe progress events.
 
 If you change SAST internals, the existing tests are the best safety net. Dashboard workflow behavior still needs dedicated coverage.
 
@@ -663,7 +700,7 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - ZIP extraction should be reviewed if the project is used with untrusted uploads in a hardened environment.
 - The current stack assumes a running Celery worker and Redis broker for scan execution.
 - DAST does not currently enforce a single active scan per website in the same way SAST cancels existing project scans.
-- SAST models do not yet have the richer indexing and multi-attempt tracking that later phases may need.
+- SAST models now have live-polling indexes, but they do not yet have richer multi-attempt tracking that later phases may need.
 
 ---
 
@@ -681,6 +718,8 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - Safe live ingestion progress events
 - Repository browsing endpoints
 - AI-assisted SAST scanning with orchestrator and specialist agents
+- Deterministic SAST pre-scan repository inventory
+- Streaming SAST finding/fix persistence during sequential specialist execution
 - Safe live SAST agent activity, tool-call, and phase progress events
 - Fix generation and verification
 - Workspace deletion and cancellation flows
