@@ -63,6 +63,8 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
             ),
             model=self.scan_model,
             max_tool_calls=settings.SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS,
+            progress_phase=f'specialist:{self.vulnerability_type.lower()}:investigate',
+            progress_title=f'{self.specialist_title} investigation',
         )
         self.phase_metadata.append({
             'phase': 'investigate',
@@ -94,6 +96,8 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
             ),
             model=self.fix_model,
             max_tool_calls=settings.SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS,
+            progress_phase=f'specialist:{self.vulnerability_type.lower()}:fix',
+            progress_title=f'{self.specialist_title} fix generation',
         )
         self.phase_metadata.append({
             'phase': 'fix',
@@ -125,6 +129,8 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
             ),
             model=self.verify_model,
             max_tool_calls=settings.SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS,
+            progress_phase=f'specialist:{self.vulnerability_type.lower()}:verify',
+            progress_title=f'{self.specialist_title} fix verification',
         )
         self.phase_metadata.append({
             'phase': 'verify',

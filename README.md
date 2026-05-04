@@ -10,6 +10,7 @@ VulnAssesor is a Django 5.2 security assessment workspace for websites and sourc
 - Configure Nuclei behavior and provider-specific SAST AI model settings from the web UI.
 - Create SAST projects from Git URLs or ZIP uploads.
 - Watch real-time scan progress and review findings.
+- Watch safe live activity for DAST scans, SAST scans, and project ingestion.
 - Read AI explanations and proposed fixes for SAST findings.
 - Browse imported repositories with a read-only file explorer and code viewer.
 
@@ -69,7 +70,8 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 4. If no templates are selected, the worker uses Nuclei's default templates.
 5. The Celery task writes any selected templates to a temporary directory, runs Nuclei, and parses JSONL findings.
 6. The dashboard updates the scan row with HTMX polling until the job finishes.
-7. Open the results page to filter by severity, search findings, copy raw JSON, or export the scan as JSON.
+7. DAST progress events show queueing, template preparation, Nuclei execution, heartbeat, parsing, findings, and terminal status without requiring a page refresh.
+8. Open the results page to filter by severity, search findings, copy raw JSON, or export the scan as JSON.
 
 ## How SAST Works
 1. Create a project from a Git URL or a ZIP upload.
@@ -82,7 +84,14 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 8. Deduplicated surfaces are dispatched sequentially to specialist agents for deeper investigation, fix generation, and fix verification.
 9. The selected AI provider is read once from Configuration > AI Providers and shared across the sequential agents, with separate conversations per agent.
 10. Findings store file path, line number, severity, description, code snippet, AI explanation, and a proposed fix.
-11. The project page shows scan status, scan history, and read-only workspace browsing endpoints.
+11. The project page shows scan status, scan history, safe live agent activity, and read-only workspace browsing endpoints.
+
+## Live Progress
+The command center polls a live operations partial so active scans and ingestion jobs appear and disappear without a manual refresh. Project pages also poll focused SAST scan and ingestion activity panels.
+
+Progress events are intentionally safe activity summaries. They include lifecycle phases, tool names, searched/read paths, line ranges, counts, model names, findings/fix milestones, and status changes. They do not expose raw private model reasoning, full prompts, full tool outputs, source file contents, or proposed code bodies in the progress stream. Detailed findings and fixes remain available in the normal result views.
+
+Progress history is bounded per scan or project so the database keeps recent operational context without unbounded growth.
 
 ## Useful Commands
 - `python manage.py load_templates` - import YAML templates from `nuclei-templates/`.

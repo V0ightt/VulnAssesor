@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import AIConfig
+from .models import AIConfig, ScanJob, ScanProgressEvent, Website
 
 
 class AIConfigTests(TestCase):
@@ -83,3 +83,42 @@ class AIConfigTests(TestCase):
         config.provider = 'openai'
         self.assertEqual(config.selected_provider_settings()['scan_model'], 'openai-scan')
         self.assertEqual(config.verify_model, 'openai-verify')
+
+
+class DashboardProgressTests(TestCase):
+    def test_scan_progress_events_are_ordered_and_pruned(self):
+        user = User.objects.create_user(username='owner', password='pass12345')
+        website = Website.objects.create(name='App', url='https://example.com', owner=user)
+        scan = ScanJob.objects.create(website=website, status='RUNNING')
+
+        for index in range(ScanProgressEvent.MAX_EVENTS_PER_SCAN + 5):
+            ScanProgressEvent.record(
+                scan_job=scan,
+                phase='test',
+                event_type='heartbeat',
+                title=f'event {index}',
+            )
+
+        events = list(scan.progress_events.all())
+        self.assertEqual(len(events), ScanProgressEvent.MAX_EVENTS_PER_SCAN)
+        self.assertEqual(events, sorted(events, key=lambda event: event.sequence))
+        self.assertEqual(events[-1].title, f'event {ScanProgressEvent.MAX_EVENTS_PER_SCAN + 4}')
+
+    def test_live_operations_partial_is_user_scoped(self):
+        owner = User.objects.create_user(username='owner', password='pass12345')
+        other = User.objects.create_user(username='other', password='pass12345')
+        owner_site = Website.objects.create(name='Owner Site', url='https://owner.example', owner=owner)
+        other_site = Website.objects.create(name='Other Site', url='https://other.example', owner=other)
+        owner_scan = ScanJob.objects.create(website=owner_site, status='RUNNING')
+        other_scan = ScanJob.objects.create(website=other_site, status='RUNNING')
+        ScanProgressEvent.record(owner_scan, 'execute', 'heartbeat', 'Owner event')
+        ScanProgressEvent.record(other_scan, 'execute', 'heartbeat', 'Other event')
+
+        self.client.force_login(owner)
+        response = self.client.get(reverse('dashboard_live_operations'), HTTP_HX_REQUEST='true')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Owner Site')
+        self.assertContains(response, 'Owner event')
+        self.assertNotContains(response, 'Other Site')
+        self.assertNotContains(response, 'Other event')

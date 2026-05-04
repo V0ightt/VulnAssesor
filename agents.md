@@ -220,6 +220,24 @@ Indexes:
 - `job` plus `severity`
 - `severity` plus `created_at`
 
+#### `ScanProgressEvent`
+Bounded, safe live progress events for DAST scans.
+
+Fields:
+- `scan_job`
+- `sequence`
+- `phase`
+- `event_type`
+- `title`
+- `detail`
+- `payload`
+- `created_at`
+
+Behavior:
+- `record(...)` appends a sequenced event for the scan.
+- Old events are pruned so each scan keeps only recent operational context.
+- Payloads are safe summaries and should not include raw scanner output beyond bounded status metadata.
+
 ### 5.2 Routes and views
 
 #### Authentication
@@ -229,6 +247,7 @@ Indexes:
 
 #### Dashboard and website management
 - `/` - `dashboard_view`
+- `/dashboard/live-operations/` - `dashboard_live_operations_view`, HTMX command-center live operations partial
 - `/website/add/` - `website_add_view`
 - `/website/<int:pk>/edit/` - `website_edit_view`
 - `/website/<int:pk>/delete/` - `website_delete_view`
@@ -264,8 +283,9 @@ Indexes:
 5. Run Nuclei with JSONL output enabled.
 6. Capture stdout and stderr using real temporary files for Windows compatibility.
 7. Parse each JSON line into a `ScanResult` row.
-8. Update the job to `COMPLETED`, `FAILED`, or `CANCELLED`.
-9. Store `completed_at` and, on failure, `error_message`.
+8. Emit safe progress events for queueing, configuration, template preparation, command launch, heartbeat, parsing, findings, and terminal status.
+9. Update the job to `COMPLETED`, `FAILED`, or `CANCELLED`.
+10. Store `completed_at` and, on failure, `error_message`.
 
 Additional notes:
 - The helper `check_cancellation_and_wait` exists, but the task currently uses its own polling loop.
@@ -376,6 +396,26 @@ Scope values:
 - `SNIPPET`
 - `FILE`
 
+#### `ProjectProgressEvent`
+Bounded, safe live progress events for SAST project ingestion and SAST scans.
+
+Fields:
+- `project`
+- `scan_job` - optional; null for ingestion events
+- `sequence`
+- `phase`
+- `event_type`
+- `title`
+- `detail`
+- `payload`
+- `created_at`
+
+Behavior:
+- Scan events are scoped to a `SASTScanJob`; ingestion events are scoped to the project.
+- `record(...)` appends sequenced events and prunes older entries.
+- Tool-call events expose safe activity only: tool name, paths, line ranges, hit counts, samples, model/phase metadata, and outcomes.
+- Events must not expose private chain-of-thought, raw prompts, full tool outputs, full source file content, or proposed code bodies.
+
 ### 6.2 Routes and views
 
 - `/sast/projects/` - `project_list`
@@ -384,6 +424,7 @@ Scope values:
 - `/sast/projects/<int:project_id>/explorer/` - `file_explorer`
 - `/sast/projects/<int:project_id>/viewer/` - `file_viewer`
 - `/sast/projects/<int:project_id>/scan/` - `start_scan`
+- `/sast/projects/<int:project_id>/ingestion-status/` - `ingestion_status`
 - `/sast/projects/<int:project_id>/cancel-ingestion/` - `cancel_ingestion`
 - `/sast/scans/<int:scan_id>/cancel/` - `cancel_scan`
 - `/sast/scans/<int:scan_id>/status/` - `scan_status`
@@ -397,8 +438,9 @@ Project creation starts with either a repository URL or an uploaded ZIP file. `i
 2. Sets the project to `CLONING`.
 3. Creates the workspace with `ProjectManager`.
 4. Clones the repository or extracts the ZIP archive.
-5. Sets `root_directory` and marks the project `READY`.
-6. Marks the project `FAILED` or `CANCELLED` on error or cancellation.
+5. Emits safe ingestion progress for workspace preparation, clone or extract milestones, ready, failed, and cancelled states.
+6. Sets `root_directory` and marks the project `READY`.
+7. Marks the project `FAILED` or `CANCELLED` on error or cancellation.
 
 When a scan starts, `run_sast_scan`:
 
@@ -410,10 +452,11 @@ When a scan starts, `run_sast_scan`:
 6. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces.
 7. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
 8. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
-9. Stores aggregate orchestrator and specialist metadata in `agent_run_metadata`.
-10. Persists `SASTFinding` rows through `report_vulnerability`.
-11. Saves proposed fixes through `apply_fix(...)` as `SASTFix` rows.
-12. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
+9. Emits safe progress events for provider setup, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, completion, failure, and cancellation.
+10. Stores aggregate orchestrator and specialist metadata in `agent_run_metadata`.
+11. Persists `SASTFinding` rows through `report_vulnerability`.
+12. Saves proposed fixes through `apply_fix(...)` as `SASTFix` rows.
+13. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
 
 Cancellation behavior:
 - `cancel_scan` marks an active scan as `CANCELLED`.
@@ -441,7 +484,8 @@ Important guardrails:
 - `resolve_path()` blocks path traversal.
 - `get_directory_structure()` hides `.git` by default.
 - `iter_workspace_files()` skips ignored directories and hidden implementation folders.
-- `extract_zip()` currently uses `extractall`, so untrusted uploads should be reviewed carefully if this is promoted to a hardened deployment.
+- `clone_repository()` and `extract_zip()` accept optional progress callbacks used by live ingestion events.
+- ZIP extraction should still be reviewed carefully if this is promoted to a hardened deployment.
 
 ### 6.5 SAST helper functions
 
@@ -524,6 +568,7 @@ Structured output models:
 
 Supporting components:
 - `BaseToolCallingAgent` owns project context loading, tool definitions, tool dispatch, structured parsing, and cancellation checks.
+- `BaseToolCallingAgent` emits safe progress events for tool calls without persisting raw file contents or private reasoning.
 - `ScanMemoryManager` tracks explored paths, tool counts, truncation, and compacts older tool output.
 - `aggregate_scan_metadata()` preserves legacy top-level metadata keys and adds nested `orchestrator` and `specialists` metadata.
 - `ExplorationResult` wraps the raw investigation transcript and metadata.
@@ -541,13 +586,15 @@ Current templates and partials:
 - `templates/sast/project_detail.html`
 - `templates/sast/partials/project_detail_content.html`
 - `templates/sast/partials/scan_status.html`
+- `templates/sast/partials/scan_activity.html`
+- `templates/sast/partials/ingestion_status.html`
 - `templates/sast/partials/file_explorer.html`
 - `templates/sast/partials/file_viewer.html`
 
 Important UI behavior:
 - `project_detail` auto-refreshes the outer content while ingestion is in progress.
 - `scan_status` polls every 2 seconds for active scans.
-- The project detail view shows scan controls, current scan status, findings, fixes, and read-only project context.
+- The project detail view shows scan controls, current scan status, safe live scan activity, ingestion activity, findings, fixes, and read-only project context.
 - The file explorer and viewer are implemented as read-only partial endpoints for repository navigation and syntax-highlighted code viewing.
 - Pygments uses the Monokai theme for code highlighting.
 
@@ -597,11 +644,11 @@ Behavior notes:
 ## 8. Testing and Coverage
 
 Current test coverage is uneven:
-- `Dashboard/tests.py` is still a placeholder.
+- `Dashboard/tests.py` covers AI configuration and live progress event basics, but DAST behavior still needs broader coverage.
 - `SAST/tests.py` contains meaningful coverage for the repository tools, memory manager, orchestrator, specialist registry, specialist fix flow, cancellation behavior, and fix persistence.
-- The SAST tests also use fakes to verify response replay, structured output, provider routing, metadata aggregation, and tool-loop behavior.
+- The SAST tests also use fakes to verify response replay, structured output, provider routing, metadata aggregation, tool-loop behavior, and safe progress events.
 
-If you change SAST internals, the existing tests are the best safety net. Dashboard behavior still needs dedicated coverage.
+If you change SAST internals, the existing tests are the best safety net. Dashboard workflow behavior still needs dedicated coverage.
 
 ---
 
@@ -628,10 +675,13 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - Nuclei template CRUD
 - Nuclei configuration UI and command generation
 - DAST scan orchestration with live polling
+- Safe live DAST progress events and command-center operations polling
 - DAST results viewing, filtering, and export
 - Project ingestion from Git or ZIP
+- Safe live ingestion progress events
 - Repository browsing endpoints
 - AI-assisted SAST scanning with orchestrator and specialist agents
+- Safe live SAST agent activity, tool-call, and phase progress events
 - Fix generation and verification
 - Workspace deletion and cancellation flows
 - Docker-based local environment

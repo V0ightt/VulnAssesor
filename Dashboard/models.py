@@ -3,6 +3,7 @@ import os
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.db.models import Max
 
 # Create your models here.
 
@@ -469,4 +470,57 @@ class ScanResult(models.Model):
             models.Index(fields=['job', 'severity']),
             models.Index(fields=['severity', '-created_at']),
         ]
+
+
+class ScanProgressEvent(models.Model):
+    """
+    Bounded, safe progress stream for a DAST scan.
+    """
+    MAX_EVENTS_PER_SCAN = 80
+
+    scan_job = models.ForeignKey(ScanJob, on_delete=models.CASCADE, related_name='progress_events')
+    sequence = models.PositiveIntegerField(default=1)
+    phase = models.CharField(max_length=80)
+    event_type = models.CharField(max_length=40)
+    title = models.CharField(max_length=160)
+    detail = models.TextField(blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sequence', 'created_at']
+        indexes = [
+            models.Index(fields=['scan_job', 'sequence']),
+            models.Index(fields=['scan_job', '-created_at']),
+            models.Index(fields=['event_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Scan #{self.scan_job_id} [{self.sequence}] {self.title}"
+
+    @classmethod
+    def record(cls, scan_job, phase, event_type, title, detail='', payload=None):
+        current = cls.objects.filter(scan_job=scan_job).aggregate(max_sequence=Max('sequence'))
+        event = cls.objects.create(
+            scan_job=scan_job,
+            sequence=(current['max_sequence'] or 0) + 1,
+            phase=phase,
+            event_type=event_type,
+            title=title,
+            detail=detail or '',
+            payload=payload or {},
+        )
+        cls.prune(scan_job)
+        return event
+
+    @classmethod
+    def prune(cls, scan_job, keep=None):
+        limit = keep or cls.MAX_EVENTS_PER_SCAN
+        stale_ids = list(
+            cls.objects.filter(scan_job=scan_job)
+            .order_by('-sequence')
+            .values_list('id', flat=True)[limit:]
+        )
+        if stale_ids:
+            cls.objects.filter(id__in=stale_ids).delete()
 

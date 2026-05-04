@@ -3,6 +3,7 @@ from django.conf import settings
 from Dashboard.models import AIConfig
 
 from ..llm import build_provider
+from ..progress import record_scan_event
 from .base import BaseToolCallingAgent
 from .memory import aggregate_scan_metadata
 from .registry import SpecialistRegistry
@@ -39,8 +40,17 @@ class OrchestratorAgent(BaseToolCallingAgent):
             ),
             model=self.scan_model,
             max_tool_calls=settings.SAST_SCAN_ORCHESTRATOR_MAX_TOOL_CALLS,
+            progress_phase='orchestrator',
+            progress_title='Orchestrator mapping repository surfaces',
         )
         self.last_metadata = exploration.memory.build_metadata(exploration.stop_reason, exploration.final_response_text)
+        self._record_progress(
+            'orchestrator',
+            'structured_parse',
+            'Building vulnerability surface map',
+            'Converting gathered repository evidence into dispatchable specialist work.',
+            {'tool_call_count': self.last_metadata.get('tool_call_count', 0)},
+        )
         parsed = self._parse_structured_output(
             model=self.scan_model,
             schema=OrchestratorSurfaceResult,
@@ -51,6 +61,13 @@ class OrchestratorAgent(BaseToolCallingAgent):
                 'evidence_paths, recommended_files, and priority. Do not produce confirmed findings or fixes.'
             ),
             user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+        )
+        self._record_progress(
+            'orchestrator',
+            'surfaces_discovered',
+            f'Discovered {len(parsed.surfaces)} potential surface(s)',
+            'Potential surfaces are ready for specialist review.',
+            {'surface_count': len(parsed.surfaces)},
         )
         return parsed.surfaces
 
@@ -82,12 +99,37 @@ class SASTScanOrchestrator:
 
         try:
             self._ensure_scan_active()
+            self._record_progress(
+                'orchestrator',
+                'started',
+                'Orchestrator started',
+                'Broad repository exploration is underway.',
+            )
             surfaces = orchestrator.discover_surfaces()
             orchestrator_metadata = orchestrator.last_metadata
             surfaces = self._limit_surfaces(self._dedupe_surfaces(surfaces))
+            self._record_progress(
+                'orchestrator',
+                'dispatch_ready',
+                f'{len(surfaces)} surface(s) selected for specialist review',
+                'Deduplicated and prioritized surfaces will run sequentially.',
+                {'surface_count': len(surfaces)},
+            )
 
             for surface in surfaces:
                 self._ensure_scan_active()
+                self._record_progress(
+                    'specialist',
+                    'specialist_started',
+                    f'{surface.vulnerability_type} specialist started',
+                    surface.title,
+                    {
+                        'surface_id': surface.surface_id,
+                        'vulnerability_type': surface.vulnerability_type,
+                        'priority': surface.priority,
+                        'evidence_paths': surface.evidence_paths,
+                    },
+                )
                 specialist = self.registry.create(
                     surface.vulnerability_type,
                     self.project,
@@ -100,6 +142,17 @@ class SASTScanOrchestrator:
                 active_surface = surface
                 surface_results = specialist.run(surface)
                 findings.extend(surface_results)
+                self._record_progress(
+                    'specialist',
+                    'specialist_completed',
+                    f'{surface.vulnerability_type} specialist completed',
+                    f'{len(surface_results)} confirmed finding result(s) from this surface.',
+                    {
+                        'surface_id': surface.surface_id,
+                        'vulnerability_type': surface.vulnerability_type,
+                        'finding_results': len(surface_results),
+                    },
+                )
                 specialist_metadata_entries.append({
                     'surface_id': surface.surface_id,
                     'vulnerability_type': surface.vulnerability_type,
@@ -115,6 +168,13 @@ class SASTScanOrchestrator:
                 stop_reason='completed',
             )
             self.last_scan_metadata = metadata
+            self._record_progress(
+                'complete',
+                'completed',
+                'Agent workflow completed',
+                f'The orchestrator and specialists produced {len(findings)} confirmed finding result(s).',
+                {'finding_results': len(findings)},
+            )
             return ScanExecutionResult(findings=findings, metadata=metadata)
         except Exception:
             if not orchestrator_metadata:
@@ -169,3 +229,14 @@ class SASTScanOrchestrator:
 
     def _normalize_path(self, path):
         return (path or '').replace('\\', '/').strip().strip('/')
+
+    def _record_progress(self, phase, event_type, title, detail='', payload=None):
+        if self.scan_job:
+            record_scan_event(
+                self.scan_job,
+                phase=phase,
+                event_type=event_type,
+                title=title,
+                detail=detail,
+                payload=payload or {},
+            )

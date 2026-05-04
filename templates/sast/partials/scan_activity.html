@@ -1,0 +1,36 @@
+<div class="scan-activity-panel">
+    <div class="scan-activity-header">
+        <div>
+            <h3>Agent Activity</h3>
+            <p>Safe live view of phases, tool calls, evidence paths, and outcomes.</p>
+        </div>
+        {% if scan.status == 'PENDING' or scan.status == 'SCANNING' or scan.status == 'CLONING' %}
+        <span class="scan-activity-live"><span></span> Live</span>
+        {% endif %}
+    </div>
+
+    <div class="scan-activity-timeline">
+        {% for event in scan_events %}
+        <div class="scan-activity-event event-{{ event.event_type }}">
+            <div class="scan-event-rail"><span></span></div>
+            <div class="scan-event-body">
+                <div class="scan-event-meta">
+                    <span class="scan-event-phase">{{ event.phase }}</span>
+                    <span>{{ event.created_at|timesince }} ago</span>
+                </div>
+                <strong>{{ event.title }}</strong>
+                {% if event.detail %}<p>{{ event.detail }}</p>{% endif %}
+                {% if event.payload %}
+                <div class="scan-event-payload">
+                    {% for key, value in event.payload.items %}
+                    <span><b>{{ key }}</b>: {{ value }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="scan-activity-empty">Waiting for worker activity...</div>
+        {% endfor %}
+    </div>
+</div>

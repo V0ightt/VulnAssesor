@@ -3,9 +3,10 @@ from django.contrib.auth.decorators import login_required
 from django.views.decorators.cache import never_cache
 from django.http import HttpResponse, JsonResponse
 from celery.result import AsyncResult
-from .models import Project, SASTScanJob, SASTFinding
+from .models import Project, SASTScanJob, SASTFinding, ProjectProgressEvent
 from .services import ProjectManager
 from .tasks import ingest_project_task, run_sast_scan
+from .progress import record_project_event, record_scan_event
 from pygments import highlight
 from pygments.lexers import get_lexer_for_filename, TextLexer
 from pygments.formatters import HtmlFormatter
@@ -29,6 +30,14 @@ def project_create(request):
             source_zip=zip_file,
             owner=request.user
         )
+        record_project_event(
+            project,
+            phase='queue',
+            event_type='queued',
+            title='Project ingestion queued',
+            detail='The project source import task has been queued.',
+            payload={'source': 'git' if repo_url else 'zip'},
+        )
         
         # Trigger initial setup (clone/extract) asynchronously
         ingestion_task = ingest_project_task.delay(project.id)
@@ -44,11 +53,15 @@ def project_detail(request, project_id):
     project = get_object_or_404(Project, id=project_id, owner=request.user)
     latest_scan = project.scans.order_by('-created_at').first()
     scan_history = project.scans.order_by('-created_at')[:10] # Get last 10 scans
+    ingestion_events = project.progress_events.filter(scan_job__isnull=True).order_by('-sequence')[:12]
+    scan_events = latest_scan.progress_events.order_by('-sequence')[:16] if latest_scan else []
 
     context = {
         'project': project, 
         'latest_scan': latest_scan,
-        'scan_history': scan_history
+        'scan_history': scan_history,
+        'ingestion_events': ingestion_events,
+        'scan_events': scan_events,
     }
 
     if request.headers.get('HX-Request') == 'true':
@@ -60,7 +73,16 @@ def project_detail(request, project_id):
 @never_cache
 def scan_status(request, scan_id):
     scan = get_object_or_404(SASTScanJob, id=scan_id, project__owner=request.user)
-    return render(request, 'sast/partials/scan_status.html', {'scan': scan})
+    events = scan.progress_events.order_by('-sequence')[:16]
+    return render(request, 'sast/partials/scan_status.html', {'scan': scan, 'scan_events': events})
+
+
+@login_required
+@never_cache
+def ingestion_status(request, project_id):
+    project = get_object_or_404(Project, id=project_id, owner=request.user)
+    events = project.progress_events.filter(scan_job__isnull=True).order_by('-sequence')[:16]
+    return render(request, 'sast/partials/ingestion_status.html', {'project': project, 'ingestion_events': events})
 
 @login_required
 def file_explorer(request, project_id):
@@ -118,9 +140,24 @@ def start_scan(request, project_id):
         for scan in active_scans:
             scan.status = 'CANCELLED'
             scan.save()
+            record_scan_event(
+                scan,
+                phase='cancel',
+                event_type='cancelled',
+                title='Superseded by new scan',
+                detail='A new scan was started for this project.',
+            )
         
         # Create Scan Job
         scan_job = SASTScanJob.objects.create(project=project, status='PENDING')
+        record_scan_event(
+            scan_job,
+            phase='queue',
+            event_type='queued',
+            title='SAST scan queued',
+            detail='The multi-agent SAST workflow has been queued.',
+            payload={'project_id': project.id},
+        )
         
         # Trigger Task
         run_sast_scan.delay(scan_job.id)
@@ -135,6 +172,14 @@ def cancel_scan(request, scan_id):
         if scan.status in ['PENDING', 'SCANNING', 'CLONING']:
             scan.status = 'CANCELLED'
             scan.save()
+            record_scan_event(
+                scan,
+                phase='cancel',
+                event_type='cancelled',
+                title='SAST scan cancellation requested',
+                detail=f'{request.user.username} requested cancellation.',
+                payload={'cancelled_by': request.user.username},
+            )
     return redirect('project_detail', project_id=scan.project.id)
 
 @login_required
@@ -145,6 +190,14 @@ def cancel_ingestion(request, project_id):
             AsyncResult(project.ingestion_task_id).revoke(terminate=True)
         project.status = 'CANCELLED'
         project.save(update_fields=['status'])
+        record_project_event(
+            project,
+            phase='cancel',
+            event_type='cancelled',
+            title='Project ingestion cancellation requested',
+            detail=f'{request.user.username} requested cancellation.',
+            payload={'cancelled_by': request.user.username},
+        )
     return redirect('project_detail', project_id=project.id)
 
 @login_required

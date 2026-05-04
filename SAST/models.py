@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models import Max
 
 class Project(models.Model):
     name = models.CharField(max_length=255)
@@ -96,3 +97,74 @@ class SASTFix(models.Model):
 
     def __str__(self):
         return f"Fix for {self.finding.title}"
+
+
+class ProjectProgressEvent(models.Model):
+    """
+    Bounded, safe progress stream for ingestion and SAST scan activity.
+    """
+    MAX_EVENTS_PER_PROJECT = 120
+    MAX_EVENTS_PER_SCAN = 120
+
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='progress_events')
+    scan_job = models.ForeignKey(
+        SASTScanJob,
+        on_delete=models.CASCADE,
+        related_name='progress_events',
+        blank=True,
+        null=True,
+    )
+    sequence = models.PositiveIntegerField(default=1)
+    phase = models.CharField(max_length=80)
+    event_type = models.CharField(max_length=40)
+    title = models.CharField(max_length=160)
+    detail = models.TextField(blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sequence', 'created_at']
+        indexes = [
+            models.Index(fields=['project', 'sequence']),
+            models.Index(fields=['project', '-created_at']),
+            models.Index(fields=['scan_job', 'sequence']),
+            models.Index(fields=['event_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        target = f"scan #{self.scan_job_id}" if self.scan_job_id else f"project #{self.project_id}"
+        return f"{target} [{self.sequence}] {self.title}"
+
+    @classmethod
+    def record(cls, project, phase, event_type, title, detail='', payload=None, scan_job=None):
+        queryset = cls.objects.filter(project=project)
+        if scan_job:
+            queryset = queryset.filter(scan_job=scan_job)
+        else:
+            queryset = queryset.filter(scan_job__isnull=True)
+
+        current = queryset.aggregate(max_sequence=Max('sequence'))
+        event = cls.objects.create(
+            project=project,
+            scan_job=scan_job,
+            sequence=(current['max_sequence'] or 0) + 1,
+            phase=phase,
+            event_type=event_type,
+            title=title,
+            detail=detail or '',
+            payload=payload or {},
+        )
+        cls.prune(project, scan_job=scan_job)
+        return event
+
+    @classmethod
+    def prune(cls, project, scan_job=None, keep=None):
+        limit = keep or (cls.MAX_EVENTS_PER_SCAN if scan_job else cls.MAX_EVENTS_PER_PROJECT)
+        queryset = cls.objects.filter(project=project)
+        queryset = queryset.filter(scan_job=scan_job) if scan_job else queryset.filter(scan_job__isnull=True)
+        stale_ids = list(
+            queryset.order_by('-sequence')
+            .values_list('id', flat=True)[limit:]
+        )
+        if stale_ids:
+            cls.objects.filter(id__in=stale_ids).delete()

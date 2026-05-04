@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import zipfile
 import git
+from git import RemoteProgress
 from git.exc import GitError
 from django.conf import settings
 from .models import Project
@@ -29,7 +30,7 @@ class ProjectManager:
     def get_relative_path(self, path: Path):
         return path.resolve().relative_to(self.workspace_root.resolve()).as_posix()
 
-    def clone_repository(self):
+    def clone_repository(self, progress_callback=None):
         """Clones the git repository into the workspace."""
         if not self.project.repository_url:
             raise ValueError("No repository URL provided.")
@@ -40,7 +41,11 @@ class ProjectManager:
         if (self.workspace_root / '.git').exists():
             repo = git.Repo(str(self.workspace_root))
             origin = repo.remotes.origin
+            if progress_callback:
+                progress_callback('pull_started', 'Updating existing checkout', {'repository_url': self.project.repository_url})
             origin.pull()
+            if progress_callback:
+                progress_callback('pull_completed', 'Existing checkout updated', {})
             return repo
         else:
             # Clear directory just in case
@@ -48,9 +53,18 @@ class ProjectManager:
                 shutil.rmtree(self.workspace_root)
                 self.workspace_root.mkdir(parents=True, exist_ok=True)
                  
-            return git.Repo.clone_from(self.project.repository_url, str(self.workspace_root))
+            if progress_callback:
+                progress_callback('clone_started', 'Cloning repository', {'repository_url': self.project.repository_url})
+            repo = git.Repo.clone_from(
+                self.project.repository_url,
+                str(self.workspace_root),
+                progress=_ProgressAdapter(progress_callback) if progress_callback else None,
+            )
+            if progress_callback:
+                progress_callback('clone_completed', 'Repository clone completed', {})
+            return repo
 
-    def extract_zip(self):
+    def extract_zip(self, progress_callback=None):
         """Extracts the uploaded zip file into the workspace."""
         if not self.project.source_zip:
             raise ValueError("No source zip provided.")
@@ -65,7 +79,20 @@ class ProjectManager:
                 shutil.rmtree(entry)
 
         with zipfile.ZipFile(self.project.source_zip.path, 'r') as zip_ref:
-            zip_ref.extractall(self.workspace_root)
+            members = zip_ref.infolist()
+            total = len(members)
+            if progress_callback:
+                progress_callback('extract_started', 'Extracting ZIP archive', {'file_count': total})
+            for index, member in enumerate(members, start=1):
+                zip_ref.extract(member, self.workspace_root)
+                if progress_callback and (index == 1 or index == total or index % 25 == 0):
+                    progress_callback(
+                        'extract_progress',
+                        f'Extracted {index} of {total} archive entries',
+                        {'processed': index, 'total': total, 'name': member.filename},
+                    )
+            if progress_callback:
+                progress_callback('extract_completed', 'ZIP extraction completed', {'file_count': total})
 
     def get_file_content(self, relative_path):
         """Reads a file from the workspace."""
@@ -179,3 +206,23 @@ class ProjectManager:
         """Deletes the workspace directory."""
         if self.workspace_root.exists():
             shutil.rmtree(self.workspace_root)
+
+
+class _ProgressAdapter(RemoteProgress):
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+        self._last_percent = -1
+
+    def update(self, op_code, cur_count, max_count=None, message=''):
+        if not self.callback or not max_count:
+            return
+        percent = int((cur_count / max_count) * 100)
+        if percent == self._last_percent or percent % 20 != 0:
+            return
+        self._last_percent = percent
+        self.callback(
+            'clone_progress',
+            f'Git transfer {percent}% complete',
+            {'percent': percent, 'message': message or ''},
+        )

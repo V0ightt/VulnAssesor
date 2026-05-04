@@ -25,7 +25,7 @@ from .agents.specialists import (
     CommandInjectionSpecialistAgent,
     GenericSecuritySpecialistAgent,
 )
-from .models import Project, SASTFix, SASTScanJob
+from .models import Project, ProjectProgressEvent, SASTFix, SASTScanJob
 from .services import ProjectManager
 from .sast_tools import list_directory, read_file, search_codebase
 from .tasks import run_sast_scan
@@ -480,6 +480,46 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
         self.assertEqual(surfaces[0].vulnerability_type, 'COMMAND_INJECTION')
         self.assertIs(fake_provider.parse_calls[0]['schema'], OrchestratorSurfaceResult)
         self.assertEqual(agent.last_metadata['tool_call_count'], 1)
+
+    def test_tool_progress_events_are_safe_and_bounded(self):
+        self.write_file('app/views.py', 'SECRET_SENTINEL = "do-not-render"\n')
+        scan_job = SASTScanJob.objects.create(project=self.project, status='SCANNING')
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call(
+                    'orch-1',
+                    'read_file',
+                    '{"filepath":"app/views.py","start_line":1,"end_line":1}',
+                )),
+                fake_tool_response(output_text='No surfaces found.'),
+            ],
+            parse_responses=[OrchestratorSurfaceResult(surfaces=[])],
+        )
+
+        agent = OrchestratorAgent(
+            self.project,
+            scan_job=scan_job,
+            provider=fake_provider,
+            provider_settings=self.provider_settings(),
+        )
+        agent.discover_surfaces()
+
+        tool_event = scan_job.progress_events.filter(event_type='tool_call').get()
+        self.assertEqual(tool_event.payload['tool'], 'read_file')
+        self.assertEqual(tool_event.payload['filepath'], 'app/views.py')
+        rendered_event = f'{tool_event.title} {tool_event.detail} {tool_event.payload}'
+        self.assertNotIn('SECRET_SENTINEL', rendered_event)
+        self.assertNotIn('do-not-render', rendered_event)
+
+        for index in range(ProjectProgressEvent.MAX_EVENTS_PER_SCAN + 5):
+            ProjectProgressEvent.record(
+                project=self.project,
+                scan_job=scan_job,
+                phase='test',
+                event_type='heartbeat',
+                title=f'event {index}',
+            )
+        self.assertLessEqual(scan_job.progress_events.count(), ProjectProgressEvent.MAX_EVENTS_PER_SCAN)
 
     def test_specialist_investigates_generates_fix_and_verifies(self):
         self.load_fixture_repo()

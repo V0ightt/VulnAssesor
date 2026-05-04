@@ -55,6 +55,10 @@
         </div>
     </div>
 
+    {% if project.status != 'READY' %}
+        {% include 'sast/partials/ingestion_status.html' with ingestion_events=ingestion_events %}
+    {% endif %}
+
     {% if latest_scan %}
         {% include 'sast/partials/scan_status.html' with scan=latest_scan %}
     {% else %}

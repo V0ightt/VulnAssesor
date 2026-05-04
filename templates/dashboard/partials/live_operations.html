@@ -1,0 +1,95 @@
+<div id="live-operations"
+     class="cc-live-ops"
+     hx-get="{% url 'dashboard_live_operations' %}"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML">
+    <div class="cc-live-ops-header">
+        <div>
+            <h3>Active Operations</h3>
+            <p>{{ live_active_total }} active item{{ live_active_total|pluralize }} across scans and ingestion</p>
+        </div>
+        <div class="cc-live-badge {% if live_active_total > 0 %}cc-live-active{% endif %}">
+            <span class="cc-live-dot"></span>
+            <span>{% if live_active_total > 0 %}{{ live_active_total }} ACTIVE{% else %}ALL CLEAR{% endif %}</span>
+        </div>
+    </div>
+
+    {% if live_operations %}
+    <div class="cc-operation-grid">
+        {% for operation in live_operations %}
+        <a class="cc-operation-card" href="{{ operation.url }}">
+            <div class="cc-operation-top">
+                <span class="cc-active-type cc-type-{{ operation.kind|lower }}">{{ operation.kind }}</span>
+                <span class="cc-status-pill cc-status-{{ operation.status|lower }}">{{ operation.status }}</span>
+            </div>
+            <strong>{{ operation.name }}</strong>
+            <span class="cc-operation-time">Started {{ operation.started|timesince }} ago</span>
+            <div class="cc-mini-timeline">
+                {% for event in operation.events %}
+                <div class="cc-mini-event">
+                    <span></span>
+                    <p>{{ event.title }}</p>
+                </div>
+                {% empty %}
+                <div class="cc-mini-event">
+                    <span></span>
+                    <p>Waiting for first worker update</p>
+                </div>
+                {% endfor %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="cc-live-empty">
+        <strong>No active operations</strong>
+        <span>New scan and ingestion activity will appear here automatically.</span>
+    </div>
+    {% endif %}
+
+    <div class="cc-ops-secondary">
+        <div class="cc-ops-panel">
+            <div class="cc-panel-header compact">
+                <h3>Latest Security Signals</h3>
+            </div>
+            {% if latest_security_signals %}
+            <div class="cc-signal-list">
+                {% for signal in latest_security_signals %}
+                <a href="{{ signal.url }}" class="cc-signal-item">
+                    <span class="cc-active-type cc-type-{{ signal.kind|lower }}">{{ signal.kind }}</span>
+                    <span class="cc-signal-sev cc-sev-{{ signal.severity|lower }}">{{ signal.severity }}</span>
+                    <strong>{{ signal.title }}</strong>
+                    <small>{{ signal.target }}</small>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="cc-empty-msg">No critical or high findings yet</div>
+            {% endif %}
+        </div>
+
+        <div class="cc-ops-panel">
+            <div class="cc-panel-header compact">
+                <h3>Attention Needed</h3>
+            </div>
+            {% if attention_items %}
+            <div class="cc-attention-list">
+                {% for item in attention_items %}
+                <div class="cc-attention-item">{{ item }}</div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="cc-empty-msg">No failed jobs, missing keys, or pending fix review</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if include_oob %}
+<div id="command-center-live-badge"
+     class="cc-live-badge {% if live_active_total > 0 %}cc-live-active{% endif %}"
+     hx-swap-oob="true">
+    <span class="cc-live-dot"></span>
+    <span>{% if live_active_total > 0 %}{{ live_active_total }} ACTIVE{% else %}ALL CLEAR{% endif %}</span>
+</div>
+{% endif %}

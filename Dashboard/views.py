@@ -8,7 +8,8 @@ from django.http import HttpResponse, JsonResponse
 from django.utils import timezone
 from django.db.models import Count, Q, Sum
 from .tasks import simple_test_task, run_specialist_scan
-from .models import Website, NucleiTemplate, ScanJob, NucleiConfig, ScanResult, AIConfig
+from .models import Website, NucleiTemplate, ScanJob, NucleiConfig, ScanResult, AIConfig, ScanProgressEvent
+from .progress import record_scan_event
 import subprocess
 import json
 from VulnAssesor.celery import app as celery_app
@@ -203,7 +204,135 @@ def dashboard_view(request):
             'info': sast_info + dast_info,
         }),
     }
+    context.update(_dashboard_live_context(user))
     return render(request, 'dashboard/main_dashboard.html', context)
+
+
+@login_required
+def dashboard_live_operations_view(request):
+    """Live command-center activity partial for HTMX polling."""
+    context = _dashboard_live_context(request.user)
+    context['include_oob'] = True
+    return render(
+        request,
+        'dashboard/partials/live_operations.html',
+        context,
+    )
+
+
+def _dashboard_live_context(user):
+    from SAST.models import Project, SASTScanJob, SASTFinding, SASTFix, ProjectProgressEvent
+
+    active_sast_scans = SASTScanJob.objects.filter(
+        project__owner=user,
+        status__in=['PENDING', 'SCANNING', 'CLONING'],
+    ).select_related('project').order_by('-created_at')[:5]
+    active_dast_scans = ScanJob.objects.filter(
+        website__owner=user,
+        status__in=['PENDING', 'RUNNING'],
+    ).select_related('website').order_by('-created_at')[:5]
+    ingesting_projects = Project.objects.filter(
+        owner=user,
+        status__in=['PENDING', 'CLONING'],
+    ).order_by('-updated_at')[:5]
+
+    operations = []
+    for scan in active_sast_scans:
+        operations.append({
+            'kind': 'SAST',
+            'name': scan.project.name,
+            'status': scan.status,
+            'url': reverse_url('project_detail', scan.project.id),
+            'started': scan.created_at,
+            'events': scan.progress_events.order_by('-sequence')[:4],
+        })
+    for scan in active_dast_scans:
+        operations.append({
+            'kind': 'DAST',
+            'name': scan.website.name,
+            'status': scan.status,
+            'url': reverse_url('dast'),
+            'started': scan.created_at,
+            'events': scan.progress_events.order_by('-sequence')[:4],
+        })
+    for project in ingesting_projects:
+        operations.append({
+            'kind': 'INGEST',
+            'name': project.name,
+            'status': project.status,
+            'url': reverse_url('project_detail', project.id),
+            'started': project.updated_at,
+            'events': project.progress_events.filter(scan_job__isnull=True).order_by('-sequence')[:4],
+        })
+
+    latest_sast_events = ProjectProgressEvent.objects.filter(
+        project__owner=user,
+    ).select_related('project', 'scan_job').order_by('-created_at')[:8]
+    latest_dast_events = ScanProgressEvent.objects.filter(
+        scan_job__website__owner=user,
+    ).select_related('scan_job', 'scan_job__website').order_by('-created_at')[:8]
+
+    latest_security_signals = []
+    for finding in SASTFinding.objects.filter(
+        scan_job__project__owner=user,
+        severity__in=['CRITICAL', 'HIGH'],
+    ).select_related('scan_job__project').order_by('-id')[:5]:
+        latest_security_signals.append({
+            'kind': 'SAST',
+            'severity': finding.severity,
+            'title': finding.title,
+            'target': finding.file_path,
+            'url': reverse_url('project_detail', finding.scan_job.project.id),
+        })
+    for finding in ScanResult.objects.filter(
+        job__website__owner=user,
+        severity__in=['critical', 'high'],
+    ).select_related('job__website').order_by('-created_at')[:5]:
+        latest_security_signals.append({
+            'kind': 'DAST',
+            'severity': finding.severity.upper(),
+            'title': finding.vulnerability_name,
+            'target': finding.target_url,
+            'url': reverse_url('scan_results', finding.job.id),
+        })
+    latest_security_signals = latest_security_signals[:6]
+
+    failed_sast_count = SASTScanJob.objects.filter(project__owner=user, status='FAILED').count()
+    failed_dast_count = ScanJob.objects.filter(website__owner=user, status='FAILED').count()
+    failed_ingestion_count = Project.objects.filter(owner=user, status='FAILED').count()
+    pending_fix_count = SASTFix.objects.filter(
+        finding__scan_job__project__owner=user,
+        status='PENDING',
+    ).count()
+    ai_config = AIConfig.get_config()
+    key_statuses = ai_config.key_statuses()
+    provider_key_status = key_statuses.get(ai_config.provider, {})
+    attention_items = []
+    if failed_sast_count or failed_dast_count:
+        attention_items.append(f'{failed_sast_count + failed_dast_count} failed scan(s)')
+    if failed_ingestion_count:
+        attention_items.append(f'{failed_ingestion_count} failed ingestion(s)')
+    if pending_fix_count:
+        attention_items.append(f'{pending_fix_count} pending AI fix(es)')
+    if provider_key_status and not provider_key_status.get('configured'):
+        attention_items.append(f"{provider_key_status.get('env_var')} is missing")
+
+    active_total = len(active_sast_scans) + len(active_dast_scans) + len(ingesting_projects)
+    return {
+        'live_operations': operations,
+        'live_active_total': active_total,
+        'latest_sast_events': latest_sast_events,
+        'latest_dast_events': latest_dast_events,
+        'latest_security_signals': latest_security_signals,
+        'attention_items': attention_items,
+        'provider_key_status': provider_key_status,
+    }
+
+
+def reverse_url(name, *args):
+    from django.urls import reverse
+
+    return reverse(name, args=args)
 
 
 # DAST Page (formerly "Dashboard")
@@ -409,9 +538,19 @@ def scan_create_view(request, website_pk):
             website=website,
             status='PENDING'
         )
+        record_scan_event(
+            job,
+            phase='queue',
+            event_type='queued',
+            title='DAST scan queued',
+            detail=f'Scan queued for {website.url}.',
+            payload={'target': website.url, 'template_count': len(template_ids)},
+        )
 
         # Dispatch the task to Celery
-        run_specialist_scan.delay(job.id, list(map(int, template_ids)) if template_ids else [])
+        task = run_specialist_scan.delay(job.id, list(map(int, template_ids)) if template_ids else [])
+        job.celery_task_id = task.id
+        job.save(update_fields=['celery_task_id'])
 
         messages.success(request, f'Scan started for {website.name}!')
 
@@ -469,6 +608,14 @@ def scan_cancel_view(request, scan_pk):
             scan.cancelled_by = request.user
             scan.completed_at = timezone.now()
             scan.save()
+            record_scan_event(
+                scan,
+                phase='cancel',
+                event_type='cancelled',
+                title='DAST scan cancellation requested',
+                detail=f'{request.user.username} requested cancellation.',
+                payload={'cancelled_by': request.user.username},
+            )
 
             # Try to revoke the Celery task if it exists
             if scan.celery_task_id:

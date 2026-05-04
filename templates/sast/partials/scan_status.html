@@ -34,6 +34,8 @@
         {% endif %}
     </div>
 
+    {% include 'sast/partials/scan_activity.html' with scan_events=scan_events %}
+
     <!-- Findings Section -->
     {% if scan.findings.exists %}
     <div class="findings-list">

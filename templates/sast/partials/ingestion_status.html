@@ -1,0 +1,40 @@
+<div id="ingestion-status-panel"
+     class="scan-activity-panel"
+     {% if project.status == 'PENDING' or project.status == 'CLONING' %}
+     hx-get="{% url 'ingestion_status' project.id %}"
+     hx-trigger="every 2s"
+     hx-swap="outerHTML"
+     {% endif %}>
+    <div class="scan-activity-header">
+        <div>
+            <h3>Ingestion Activity</h3>
+            <p>Workspace setup, clone, and archive import progress.</p>
+        </div>
+        <span class="cc-status-pill cc-status-{{ project.status|lower }}">{{ project.status }}</span>
+    </div>
+
+    <div class="scan-activity-timeline">
+        {% for event in ingestion_events %}
+        <div class="scan-activity-event event-{{ event.event_type }}">
+            <div class="scan-event-rail"><span></span></div>
+            <div class="scan-event-body">
+                <div class="scan-event-meta">
+                    <span class="scan-event-phase">{{ event.phase }}</span>
+                    <span>{{ event.created_at|timesince }} ago</span>
+                </div>
+                <strong>{{ event.title }}</strong>
+                {% if event.detail %}<p>{{ event.detail }}</p>{% endif %}
+                {% if event.payload %}
+                <div class="scan-event-payload">
+                    {% for key, value in event.payload.items %}
+                    <span><b>{{ key }}</b>: {{ value }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% empty %}
+        <div class="scan-activity-empty">Waiting for ingestion worker activity...</div>
+        {% endfor %}
+    </div>
+</div>

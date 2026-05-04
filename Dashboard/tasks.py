@@ -6,6 +6,7 @@ from pathlib import Path
 from celery import shared_task
 from django.utils import timezone
 from .models import ScanJob, ScanResult, NucleiTemplate, NucleiConfig
+from .progress import record_scan_event
 
 
 @shared_task
@@ -81,11 +82,33 @@ def run_specialist_scan(self, job_id, template_ids):
         job.status = 'RUNNING'
         job.celery_task_id = self.request.id
         job.save()
+        record_scan_event(
+            job,
+            phase='dast',
+            event_type='running',
+            title='Nuclei scan started',
+            detail=f'Started scanning {job.website.url}.',
+            payload={'target': job.website.url, 'task_id': self.request.id},
+        )
 
         print(f"[Specialist] Job {job_id} status updated to RUNNING")
 
         # Get Nuclei configuration
         config = NucleiConfig.get_config()
+        record_scan_event(
+            job,
+            phase='configure',
+            event_type='configuration',
+            title='Loaded Nuclei configuration',
+            detail='Applied timeout, rate limit, concurrency, retry, and output settings.',
+            payload={
+                'timeout': config.timeout,
+                'rate_limit': config.rate_limit,
+                'concurrency': config.concurrency,
+                'retries': config.retries,
+                'jsonl_output': config.jsonl_output,
+            },
+        )
 
         # Check if we should use default templates or custom templates
         use_default_templates = not template_ids or len(template_ids) == 0
@@ -102,6 +125,13 @@ def run_specialist_scan(self, job_id, template_ids):
             if use_default_templates:
                 print(f"[Specialist] Using Nuclei default templates")
                 command = config.build_command(job.website.url, None)
+                record_scan_event(
+                    job,
+                    phase='templates',
+                    event_type='template_selection',
+                    title='Using Nuclei default templates',
+                    detail='No custom templates were selected for this scan.',
+                )
             else:
                 # Create a temporary directory to store custom templates
                 temp_dir_obj = tempfile.TemporaryDirectory()
@@ -114,6 +144,14 @@ def run_specialist_scan(self, job_id, template_ids):
                     raise ValueError("No valid templates found")
 
                 print(f"[Specialist] Writing {templates.count()} templates to {temp_dir_obj.name}")
+                record_scan_event(
+                    job,
+                    phase='templates',
+                    event_type='template_selection',
+                    title='Prepared custom templates',
+                    detail=f'Wrote {templates.count()} selected template files for Nuclei.',
+                    payload={'template_count': templates.count()},
+                )
 
                 for template in templates:
                     # Create a safe filename from the template name
@@ -130,6 +168,14 @@ def run_specialist_scan(self, job_id, template_ids):
 
             # Execute Nuclei with cancellation support
             print(f"[Specialist] Executing command: {' '.join(command)}")
+            record_scan_event(
+                job,
+                phase='execute',
+                event_type='command_started',
+                title='Nuclei command launched',
+                detail='The scanner process is running and being monitored for cancellation.',
+                payload={'command': ' '.join(command[:12]) + (' ...' if len(command) > 12 else '')},
+            )
             
             # Use mkstemp to create real files on disk for output capture
             # This avoids Windows-specific locking issues with TemporaryFile
@@ -154,6 +200,7 @@ def run_specialist_scan(self, job_id, template_ids):
                     try:
                         # Wait with timeout and periodic cancellation checks
                         start_time = time.time()
+                        last_heartbeat = start_time
                         while process.poll() is None:
                             # Check for timeout
                             if time.time() - start_time > config.timeout:
@@ -164,10 +211,28 @@ def run_specialist_scan(self, job_id, template_ids):
                             job.refresh_from_db()
                             if job.status == 'CANCELLED':
                                 print(f"[Specialist] Job {job_id} was cancelled during execution")
+                                record_scan_event(
+                                    job,
+                                    phase='execute',
+                                    event_type='cancelled',
+                                    title='Cancellation requested',
+                                    detail='The running Nuclei process was stopped.',
+                                )
                                 process.kill()
                                 process.wait(timeout=5)
                                 is_cancelled = True
                                 break
+
+                            if time.time() - last_heartbeat >= 10:
+                                record_scan_event(
+                                    job,
+                                    phase='execute',
+                                    event_type='heartbeat',
+                                    title='Nuclei still running',
+                                    detail='The scanner process is active.',
+                                    payload={'elapsed_seconds': int(time.time() - start_time)},
+                                )
+                                last_heartbeat = time.time()
 
                             time.sleep(2)
                             
@@ -219,6 +284,13 @@ def run_specialist_scan(self, job_id, template_ids):
 
         # Process the output
         findings_count = 0
+        record_scan_event(
+            job,
+            phase='parse',
+            event_type='parsing',
+            title='Parsing Nuclei output',
+            detail='Reading JSONL scan output and storing findings.',
+        )
 
         if result.stdout:
             # Each line in stdout is a JSON object representing a finding
@@ -249,6 +321,20 @@ def run_specialist_scan(self, job_id, template_ids):
                     )
 
                     findings_count += 1
+                    if findings_count <= 10 or findings_count % 10 == 0:
+                        record_scan_event(
+                            job,
+                            phase='parse',
+                            event_type='finding',
+                            title=f'Finding recorded: {vulnerability_name}',
+                            detail=f'{severity.title()} finding at {matched_at}.',
+                            payload={
+                                'severity': severity,
+                                'template': template_name,
+                                'target_url': matched_at,
+                                'findings_count': findings_count,
+                            },
+                        )
                     print(f"[Specialist] Found: {vulnerability_name} ({severity}) at {matched_at}")
 
                 except json.JSONDecodeError as e:
@@ -262,6 +348,23 @@ def run_specialist_scan(self, job_id, template_ids):
         # Update job status to COMPLETED if not cancelled
         if not is_cancelled:
             job.status = 'COMPLETED'
+            record_scan_event(
+                job,
+                phase='complete',
+                event_type='completed',
+                title='DAST scan completed',
+                detail=f'Nuclei completed with {findings_count} finding(s).',
+                payload={'findings_count': findings_count},
+            )
+        else:
+            record_scan_event(
+                job,
+                phase='complete',
+                event_type='cancelled',
+                title='DAST scan cancelled',
+                detail=f'Scan stopped after recording {findings_count} finding(s).',
+                payload={'findings_count': findings_count},
+            )
         
         job.completed_at = timezone.now()
         job.save()
@@ -292,6 +395,13 @@ def run_specialist_scan(self, job_id, template_ids):
             job.error_message = error_msg
             job.completed_at = timezone.now()
             job.save()
+            record_scan_event(
+                job,
+                phase='failed',
+                event_type='failed',
+                title='DAST scan timed out',
+                detail=error_msg,
+            )
         except:
             pass
 
@@ -307,6 +417,13 @@ def run_specialist_scan(self, job_id, template_ids):
             job.error_message = error_msg
             job.completed_at = timezone.now()
             job.save()
+            record_scan_event(
+                job,
+                phase='failed',
+                event_type='failed',
+                title='DAST scan failed',
+                detail=error_msg,
+            )
         except:
             pass
 

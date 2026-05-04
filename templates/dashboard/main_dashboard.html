@@ -19,9 +19,9 @@
         <p class="cc-subtitle">Real-time security intelligence &mdash; SAST &amp; DAST unified view</p>
     </div>
     <div class="cc-header-right">
-        <div class="cc-live-badge" :class="{ 'cc-live-active': activeTotal > 0 }">
+        <div id="command-center-live-badge" class="cc-live-badge {% if live_active_total > 0 %}cc-live-active{% endif %}">
             <span class="cc-live-dot"></span>
-            <span x-text="activeTotal > 0 ? activeTotal + ' SCAN' + (activeTotal > 1 ? 'S' : '') + ' ACTIVE' : 'ALL CLEAR'"></span>
+            <span>{% if live_active_total > 0 %}{{ live_active_total }} ACTIVE{% else %}ALL CLEAR{% endif %}</span>
         </div>
     </div>
 </div>
@@ -61,29 +61,6 @@
         <div class="cc-kpi-sub">{{ fixes_accepted }} accepted &bull; {{ fixes_pending }} pending</div>
     </div>
 </div>
-
-<!-- Active Scans Banner -->
-{% if active_total > 0 %}
-<div class="cc-active-banner" id="active-scans-banner">
-    <div class="cc-active-pulse"></div>
-    <div class="cc-active-content">
-        <strong>🔬 Live Scans Running</strong>
-        <div class="cc-active-items" x-data='{ scans: {{ active_scans_json|safe }} }'>
-            <template x-for="scan in scans" :key="scan.id">
-                <div class="cc-active-item">
-                    <span class="cc-active-type" :class="'cc-type-' + scan.type.toLowerCase()" x-text="scan.type"></span>
-                    <span class="cc-active-name" x-text="scan.name"></span>
-                    <span class="cc-active-status">
-                        <span class="cc-scan-spinner"></span>
-                        <span x-text="scan.status"></span>
-                    </span>
-                </div>
-            </template>
-        </div>
-    </div>
-</div>
-{% endif %}
-
 <!-- Main Grid -->
 <div class="cc-grid">
 
@@ -250,6 +227,9 @@
     </div>
     {% endif %}
 </div>
+<br>
+<!-- Active Operations -->
+{% include 'dashboard/partials/live_operations.html' %}
 
 <!-- Recent Activity -->
 <div class="cc-grid cc-grid-2">

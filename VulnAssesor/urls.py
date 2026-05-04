@@ -29,6 +29,7 @@ urlpatterns = [
 
     # Main Dashboard (Command Center)
     path('', views.dashboard_view, name='dashboard'),
+    path('dashboard/live-operations/', views.dashboard_live_operations_view, name='dashboard_live_operations'),
 
     # DAST Page (formerly Dashboard)
     path('dast/', views.dast_view, name='dast'),

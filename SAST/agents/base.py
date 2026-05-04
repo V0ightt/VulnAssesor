@@ -3,6 +3,7 @@ import json
 from django.conf import settings
 
 from ..sast_tools import list_directory, read_file, search_codebase
+from ..progress import record_scan_event, summarize_tool_result
 from .memory import ExplorationResult, ScanMemoryManager
 
 
@@ -108,7 +109,7 @@ class BaseToolCallingAgent:
             },
         ]
 
-    def _run_tool_loop(self, task_prompt, model, max_tool_calls=None):
+    def _run_tool_loop(self, task_prompt, model, max_tool_calls=None, progress_phase='scan', progress_title='Agent exploration'):
         max_calls = max_tool_calls or settings.SAST_SCAN_MAX_TOOL_CALLS
         memory = ScanMemoryManager(
             soft_token_threshold=settings.SAST_SCAN_SOFT_CONTEXT_TOKENS,
@@ -119,6 +120,13 @@ class BaseToolCallingAgent:
         final_response_text = ''
 
         try:
+            self._record_progress(
+                progress_phase,
+                'phase_started',
+                progress_title,
+                f'{self.__class__.__name__} started repository exploration.',
+                {'model': model, 'max_tool_calls': max_calls},
+            )
             while memory.total_calls < max_calls:
                 self._ensure_scan_active()
                 response = self.provider.create_tool_response(
@@ -129,6 +137,13 @@ class BaseToolCallingAgent:
                 if not response.tool_calls:
                     final_response_text = response.output_text
                     self.last_metadata = memory.build_metadata(stop_reason, final_response_text)
+                    self._record_progress(
+                        progress_phase,
+                        'phase_completed',
+                        f'{progress_title} completed',
+                        'The agent finished its tool exploration phase.',
+                        {'tool_call_count': memory.total_calls, 'stop_reason': stop_reason},
+                    )
                     return ExplorationResult(
                         final_response_text=final_response_text,
                         stop_reason=stop_reason,
@@ -141,6 +156,7 @@ class BaseToolCallingAgent:
                     arguments = json.loads(function_call.arguments or '{}')
                     result = self._dispatch_tool_call(function_call.name, arguments)
                     memory.record_tool_result(function_call.name, arguments, function_call.call_id, result)
+                    self._record_tool_progress(progress_phase, function_call.name, arguments, result, memory.total_calls)
                     tool_results.append((function_call, result))
                     if memory.total_calls >= max_calls:
                         stop_reason = 'tool_budget_exhausted'
@@ -153,9 +169,23 @@ class BaseToolCallingAgent:
                     break
         except ScanCancelledError:
             self.last_metadata = memory.build_metadata('cancelled', final_response_text)
+            self._record_progress(
+                progress_phase,
+                'cancelled',
+                f'{progress_title} cancelled',
+                'The agent stopped because the scan was cancelled.',
+                {'tool_call_count': memory.total_calls},
+            )
             raise
 
         self.last_metadata = memory.build_metadata(stop_reason, final_response_text)
+        self._record_progress(
+            progress_phase,
+            'phase_completed',
+            f'{progress_title} stopped',
+            f'The tool loop ended with stop reason: {stop_reason}.',
+            {'tool_call_count': memory.total_calls, 'stop_reason': stop_reason},
+        )
         return ExplorationResult(
             final_response_text=final_response_text,
             stop_reason=stop_reason,
@@ -196,3 +226,40 @@ class BaseToolCallingAgent:
             raise ScanCancelledError(f'Scan {self.scan_job.id} cancelled.')
 
     ensure_scan_active = _ensure_scan_active
+
+    def _record_tool_progress(self, phase, tool_name, arguments, result, call_count):
+        summary = summarize_tool_result(tool_name, arguments, result)
+        detail = self._tool_detail(tool_name, summary)
+        self._record_progress(
+            phase,
+            'tool_call',
+            f'Used {tool_name}',
+            detail,
+            {'tool_call_count': call_count, 'tool': tool_name, **summary},
+        )
+
+    def _record_progress(self, phase, event_type, title, detail='', payload=None):
+        if not self.scan_job:
+            return
+        record_scan_event(
+            self.scan_job,
+            phase=phase,
+            event_type=event_type,
+            title=title,
+            detail=detail,
+            payload=payload or {},
+        )
+
+    def _tool_detail(self, tool_name, summary):
+        if summary.get('error'):
+            return f"{tool_name} returned an error: {summary['error']}"
+        if tool_name == 'list_directory':
+            return f"Listed {summary.get('entry_count', 0)} entries in {summary.get('directory', '.')}"
+        if tool_name == 'search_codebase':
+            return f"Searched {summary.get('directory', '.')} and found {summary.get('total_hits', 0)} hit(s)"
+        if tool_name == 'read_file':
+            return (
+                f"Read {summary.get('filepath', '')}:"
+                f"{summary.get('start_line', 1)}-{summary.get('end_line', summary.get('start_line', 1))}"
+            )
+        return f'Executed {tool_name}'
