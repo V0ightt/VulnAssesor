@@ -308,13 +308,40 @@ def _persist_specialist_result(scan_job, specialist_result):
     finding.save(update_fields=['ai_explanation'])
 
     fix_data = specialist_result.fix
+    fix_error = getattr(specialist_result, 'fix_error', '') or ''
+    if fix_error:
+        record_scan_event(
+            scan_job,
+            phase='persist',
+            event_type='fix_failed',
+            title='Fix generation failed',
+            detail=finding.title,
+            payload={
+                'finding_id': finding.id,
+                'error': _bounded_optional_error(fix_error),
+            },
+        )
     if not fix_data:
         return finding
 
     verification = specialist_result.verification
+    verification_error = getattr(specialist_result, 'verification_error', '') or ''
     verification_status = 'NOT_VERIFIED'
     verification_reason = ''
-    if verification:
+    if verification_error:
+        verification_reason = _bounded_optional_error(verification_error)
+        record_scan_event(
+            scan_job,
+            phase='persist',
+            event_type='verification_failed',
+            title='Fix verification failed',
+            detail=finding.title,
+            payload={
+                'finding_id': finding.id,
+                'error': verification_reason,
+            },
+        )
+    elif verification:
         verification_status = 'PASSED' if verification.is_true_positive else 'FAILED'
         verification_reason = verification.reasoning
         if not verification.is_true_positive:
@@ -345,3 +372,7 @@ def _persist_specialist_result(scan_job, specialist_result):
         },
     )
     return finding
+
+
+def _bounded_optional_error(message):
+    return (message or '')[:500]

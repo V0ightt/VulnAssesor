@@ -68,7 +68,7 @@ class ScanMemoryManager:
                 chunks.append('Bounded recent evidence excerpts:\n' + '\n\n'.join(excerpts))
         return '\n\n'.join(chunks).strip()
 
-    def build_investigation_summary(self, final_response_text=''):
+    def build_investigation_summary(self, final_response_text='', include_evidence_excerpts=False):
         chunks = []
         if self.summary_lines:
             chunks.append('Earlier exploration summary:\n' + '\n'.join(f'- {line}' for line in self.summary_lines[-20:]))
@@ -77,6 +77,14 @@ class ScanMemoryManager:
                 f'- {event.summary_line}' for event in self.recent_events[-10:]
             )
             chunks.append('Recent tool results:\n' + recent_text)
+            if include_evidence_excerpts:
+                excerpts = [
+                    event.evidence_excerpt
+                    for event in self.recent_events[-6:]
+                    if event.evidence_excerpt
+                ]
+                if excerpts:
+                    chunks.append('Bounded recent evidence excerpts:\n' + '\n\n'.join(excerpts))
         if final_response_text:
             chunks.append('Model investigation summary:\n' + final_response_text.strip())
         return '\n\n'.join(chunk for chunk in chunks if chunk).strip()
@@ -93,6 +101,8 @@ class ScanMemoryManager:
         }
 
     def _build_summary_line(self, tool_name, arguments, result_payload):
+        if result_payload.get('error'):
+            return f'{tool_name} returned error: {str(result_payload["error"])[:180]}'
         if tool_name == 'list_directory':
             directory = arguments.get('directory', '') or '.'
             entries = result_payload.get('entries', [])

@@ -78,7 +78,10 @@ class FakeProvider:
             'system_prompt': system_prompt,
             'user_prompt': user_prompt,
         })
-        return self._parse_responses.pop(0)
+        response = self._parse_responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def fake_tool_response(*tool_calls, output_text=''):
@@ -418,6 +421,56 @@ class AgentLoopTests(WorkspaceTestCase):
         self.assertIn('bounded scan memory', conversation_text)
         self.assertNotIn('function_call_output', conversation_text)
 
+    def test_structured_parse_prompt_includes_bounded_evidence_excerpts(self):
+        self.write_file(
+            'app/views.py',
+            'def view(request):\n'
+            '    subprocess.run(request.GET["cmd"], shell=True)\n',
+        )
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call(
+                    'call-1',
+                    'read_file',
+                    '{"filepath":"app/views.py","start_line":1,"end_line":2}',
+                )),
+                fake_tool_response(output_text='The file contains shell execution.'),
+            ],
+            parse_responses=[ScanResult(findings=[])],
+        )
+
+        with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
+            agent = SASTAgent(self.project)
+            agent.scan_project()
+
+        parse_prompt = fake_provider.parse_calls[0]['user_prompt']
+        metadata_summary = agent.last_scan_metadata['summary']
+        self.assertIn('Bounded recent evidence excerpts', parse_prompt)
+        self.assertIn('subprocess.run(request.GET["cmd"], shell=True)', parse_prompt)
+        self.assertNotIn('subprocess.run(request.GET["cmd"], shell=True)', metadata_summary)
+
+    def test_malformed_tool_call_json_returns_tool_error(self):
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(fake_tool_call(
+                    'call-1',
+                    'read_file',
+                    '{"filepath":"app/views.py","start_line":1,',
+                )),
+                fake_tool_response(output_text='Recovered after tool error.'),
+            ],
+            parse_responses=[ScanResult(findings=[])],
+        )
+
+        with mock.patch('SAST.agent.build_provider', return_value=fake_provider):
+            agent = SASTAgent(self.project)
+            findings = agent.scan_project()
+
+        self.assertEqual(findings, [])
+        self.assertEqual(agent.last_scan_metadata['tool_call_count'], 1)
+        _, result = fake_provider.appended_tool_results[0][0]
+        self.assertIn('Malformed tool-call JSON', result['error'])
+
     def test_scan_project_does_not_inline_large_files_in_initial_prompt(self):
         self.write_file('large_module.py', ('SENTINEL_BLOCK\n' * 5000))
         fake_provider = FakeProvider(
@@ -742,6 +795,64 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertEqual(fix.end_line, 9)
         self.assertEqual(fix.verification_status, 'PASSED')
         self.assertEqual(scan_job.findings.first().confidence_score, 0.97)
+
+    def test_run_sast_scan_keeps_finding_when_fix_generation_fails(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+                fake_tool_response(output_text='Confirmed command injection.'),
+                fake_tool_response(output_text='Fix generation produced malformed structured output.'),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+                ScanResult(findings=[self.vulnerability()]),
+                RuntimeError('fix parse failed'),
+            ],
+        )
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'COMPLETED')
+        self.assertIn('completed', result.lower())
+        self.assertEqual(scan_job.findings.count(), 1)
+        self.assertEqual(SASTFix.objects.count(), 0)
+        self.assertTrue(ProjectProgressEvent.objects.filter(scan_job=scan_job, event_type='fix_failed').exists())
+        phases = scan_job.agent_run_metadata['specialists'][0]['metadata']['phases']
+        self.assertTrue(any(phase.get('phase') == 'fix' and phase.get('error') for phase in phases))
+
+    def test_run_sast_scan_keeps_fix_when_verification_fails(self):
+        self.load_fixture_repo()
+        scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
+        fake_provider = FakeProvider(
+            tool_responses=[
+                fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
+                fake_tool_response(output_text='Confirmed command injection.'),
+                fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
+                fake_tool_response(output_text='Verification produced malformed structured output.'),
+            ],
+            parse_responses=[
+                OrchestratorSurfaceResult(surfaces=[self.surface()]),
+                ScanResult(findings=[self.vulnerability()]),
+                self.fix(),
+                RuntimeError('verify parse failed'),
+            ],
+        )
+
+        with mock.patch('SAST.agents.orchestrator.build_provider', return_value=fake_provider):
+            result = run_sast_scan(scan_job.id)
+
+        scan_job.refresh_from_db()
+        self.assertEqual(scan_job.status, 'COMPLETED')
+        self.assertIn('completed', result.lower())
+        self.assertEqual(scan_job.findings.count(), 1)
+        fix = SASTFix.objects.get()
+        self.assertEqual(fix.verification_status, 'NOT_VERIFIED')
+        self.assertIn('verify parse failed', fix.verification_reason)
+        self.assertTrue(ProjectProgressEvent.objects.filter(scan_job=scan_job, event_type='verification_failed').exists())
 
     def test_run_sast_scan_persists_each_specialist_before_scan_completion(self):
         self.load_fixture_repo()

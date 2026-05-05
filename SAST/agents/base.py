@@ -153,8 +153,11 @@ class BaseToolCallingAgent:
                 tool_results = []
                 for function_call in response.tool_calls:
                     self._ensure_scan_active()
-                    arguments = json.loads(function_call.arguments or '{}')
-                    result = self._dispatch_tool_call(function_call.name, arguments)
+                    arguments, argument_error = self._parse_tool_arguments(function_call.arguments)
+                    if argument_error:
+                        result = argument_error
+                    else:
+                        result = self._dispatch_tool_call(function_call.name, arguments)
                     memory.record_tool_result(function_call.name, arguments, function_call.call_id, result)
                     self._record_tool_progress(progress_phase, function_call.name, arguments, result, memory.total_calls)
                     tool_results.append((function_call, result))
@@ -192,6 +195,23 @@ class BaseToolCallingAgent:
             stop_reason=stop_reason,
             memory=memory,
         )
+
+    def _parse_tool_arguments(self, raw_arguments):
+        raw = raw_arguments or '{}'
+        try:
+            arguments = json.loads(raw)
+        except (TypeError, json.JSONDecodeError) as exc:
+            return {}, self._malformed_tool_arguments_error(exc)
+        if not isinstance(arguments, dict):
+            return {}, self._malformed_tool_arguments_error('Tool arguments must be a JSON object.')
+        return arguments, None
+
+    def _malformed_tool_arguments_error(self, error):
+        message = str(error) or error.__class__.__name__
+        return {
+            'error': f'Malformed tool-call JSON: {message[:300]}',
+            'truncated': False,
+        }
 
     def _dispatch_tool_call(self, tool_name, arguments):
         try:

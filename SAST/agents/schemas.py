@@ -70,6 +70,8 @@ class SpecialistFindingResult(BaseModel):
     vulnerability: Vulnerability
     fix: FixResult | None = None
     verification: VerificationResult | None = None
+    fix_error: str = ''
+    verification_error: str = ''
     specialist_metadata: dict = Field(default_factory=dict)
 
 

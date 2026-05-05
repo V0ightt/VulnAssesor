@@ -1,10 +1,13 @@
 import json
+import logging
 
 from django.conf import settings
 
-from .base import BaseToolCallingAgent
+from .base import BaseToolCallingAgent, ScanCancelledError
 from .memory import merge_memory_metadata
 from .schemas import FixResult, ScanResult, SpecialistFindingResult, VerificationResult
+
+logger = logging.getLogger(__name__)
 
 
 class BaseSpecialistAgent(BaseToolCallingAgent):
@@ -34,15 +37,35 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
 
         for vulnerability in vulnerabilities:
             self.ensure_scan_active()
-            fix = self.generate_fix(vulnerability)
-            self.ensure_scan_active()
-            verification = self.verify_fix(vulnerability, fix)
+            fix = None
+            verification = None
+            fix_error = ''
+            verification_error = ''
+
+            try:
+                fix = self.generate_fix(vulnerability)
+            except ScanCancelledError:
+                raise
+            except Exception as exc:
+                fix_error = self._record_optional_phase_failure('fix', exc)
+
+            if fix:
+                self.ensure_scan_active()
+                try:
+                    verification = self.verify_fix(vulnerability, fix)
+                except ScanCancelledError:
+                    raise
+                except Exception as exc:
+                    verification_error = self._record_optional_phase_failure('verify', exc)
+
             result = SpecialistFindingResult(
                 surface_id=surface.surface_id,
                 vulnerability_type=surface.vulnerability_type,
                 vulnerability=vulnerability,
                 fix=fix,
                 verification=verification,
+                fix_error=fix_error,
+                verification_error=verification_error,
             )
             results.append(result)
 
@@ -79,7 +102,10 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
                 'Only include issues directly supported by gathered code evidence. '
                 'If the surface is not exploitable, return an empty findings list.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
         return parsed.findings
 
@@ -111,7 +137,10 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
                 + '\n\nReturn a structured fix. `scope` must be SNIPPET or FILE. '
                 'Use precise start_line and end_line values for the replacement range.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
 
     def verify_fix(self, vulnerability, fix):
@@ -140,8 +169,43 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
             model=self.verify_model,
             schema=VerificationResult,
             system_prompt='You are a QA engineer verifying AI-generated security fixes. Return structured verification only.',
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
+
+    def _record_optional_phase_failure(self, phase, exc):
+        error = self._bounded_error(exc)
+        metadata = {
+            'phase': phase,
+            'summary': '',
+            'tool_call_count': 0,
+            'tool_counts': {},
+            'truncation_count': 0,
+            'explored_paths': [],
+            'compactions': 0,
+            'stop_reason': 'failed',
+            'error': error,
+        }
+        if self.phase_metadata and self.phase_metadata[-1].get('phase') == phase:
+            self.phase_metadata[-1]['stop_reason'] = 'failed'
+            self.phase_metadata[-1]['error'] = error
+        else:
+            self.phase_metadata.append(metadata)
+        self._record_progress(
+            f'specialist:{self.vulnerability_type.lower()}:{phase}',
+            f'{phase}_failed',
+            f'{self.specialist_title} {phase} failed',
+            f'Optional {phase} work failed; the confirmed finding will still be kept.',
+            {'error': error},
+        )
+        logger.warning('%s %s phase failed: %s', self.specialist_title, phase, error)
+        return error
+
+    def _bounded_error(self, exc):
+        message = str(exc) or exc.__class__.__name__
+        return f'{exc.__class__.__name__}: {message}'[:500]
 
     def _build_specialist_metadata(self, stop_reason='completed'):
         metadata = merge_memory_metadata(self.phase_metadata, stop_reason=stop_reason)

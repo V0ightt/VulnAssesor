@@ -65,7 +65,10 @@ class SASTAgent(BaseToolCallingAgent):
                 'Only include issues directly supported by the gathered evidence. '
                 'If no supported vulnerability exists, return an empty findings list.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
         return [finding.model_dump() for finding in parsed.findings]
 
@@ -90,7 +93,10 @@ class SASTAgent(BaseToolCallingAgent):
                 + '\n\nReturn a structured fix. `scope` must be SNIPPET or FILE. '
                 'Use precise start_line and end_line values for the replacement range.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
         return result.model_dump()
 
@@ -112,7 +118,10 @@ class SASTAgent(BaseToolCallingAgent):
             model=self.verify_model,
             schema=VerificationResult,
             system_prompt='You are a QA engineer verifying AI-generated security fixes. Return structured verification only.',
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
         return {
             'verified': result.is_true_positive,

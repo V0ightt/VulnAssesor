@@ -69,7 +69,10 @@ class OrchestratorAgent(BaseToolCallingAgent):
                 'Return only potential surfaces. Each surface must include a vulnerability_type, rationale, '
                 'evidence_paths, recommended_files, and priority. Do not produce confirmed findings or fixes.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(exploration.final_response_text),
+            user_prompt=exploration.memory.build_investigation_summary(
+                exploration.final_response_text,
+                include_evidence_excerpts=True,
+            ),
         )
         self._record_progress(
             'orchestrator',

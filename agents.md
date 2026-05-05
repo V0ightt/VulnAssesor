@@ -1,6 +1,6 @@
 # VulnAssesor Project Specification
 
-- **Last Updated:** May 4, 2026
+- **Last Updated:** May 5, 2026
 - **Current State:** Working Django 5.2 application with Nuclei DAST and configurable AI-backed multi-agent SAST
 - **Operational Mode:** Development-oriented stack with background workers and live HTMX updates
 
@@ -485,8 +485,8 @@ When a scan starts, `run_sast_scan`:
 7. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces, using the inventory only as routing context.
 8. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
 9. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
-10. Persists each specialist result immediately after its fix and verification are ready.
-11. Emits safe progress events for provider setup, inventory, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, completion, failure, and cancellation.
+10. Preserves confirmed findings even if optional fix generation or verification fails, while still saving successful fixes and verification outcomes.
+11. Emits safe progress events for provider setup, inventory, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, optional fix or verification failures, completion, failure, and cancellation.
 12. Stores running and final aggregate orchestrator, specialist, inventory, surface, and tool metadata in `agent_run_metadata`.
 13. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
 
@@ -552,9 +552,9 @@ Core characteristics:
 - `OrchestratorAgent` performs broad repository exploration and returns potential `VulnerabilitySurface` objects only.
 - `SpecialistRegistry` maps vulnerability types to specialist classes and falls back to `GenericSecuritySpecialistAgent`.
 - Specialists run sequentially for v1; Celery fan-out is intentionally deferred.
-- Agents return structured data only. `run_sast_scan` remains the persistence boundary, but each specialist result is saved immediately after fix generation and verification.
+- Agents return structured data only. `run_sast_scan` remains the persistence boundary, and confirmed findings are kept even when optional fix generation or verification fails.
 - One provider is built from `AIConfig` per scan and passed to each agent; each agent starts its own conversation.
-- Provider conversations are rebased after tool turns onto the task prompt, compact summaries, and bounded recent evidence excerpts so older raw tool outputs are not repeatedly resent.
+- Provider conversations and structured parse prompts use compact summaries and bounded recent evidence excerpts so older raw tool outputs are not repeatedly resent.
 - It loads the target project's `agents.md`, `AGENTS.md`, and `README.md` into the system context when available.
 - It does not assume repository contents that have not been discovered through tool calls.
 - It focuses on exploitable vulnerabilities only, not style warnings.
@@ -603,8 +603,8 @@ Structured output models:
 - `ScanExecutionResult`
 
 Supporting components:
-- `BaseToolCallingAgent` owns project context loading, tool definitions, tool dispatch, structured parsing, and cancellation checks.
-- `BaseToolCallingAgent` emits safe progress events for tool calls without persisting raw file contents or private reasoning.
+- `BaseToolCallingAgent` owns project context loading, tool definitions, safe tool-argument parsing, tool dispatch, structured parsing, and cancellation checks.
+- `BaseToolCallingAgent` emits safe progress events for tool calls without persisting raw file contents or private reasoning, and malformed tool-call JSON is returned to the model as a bounded tool error.
 - `ScanMemoryManager` tracks explored paths, tool counts, truncation, compact summaries, and bounded recent evidence excerpts.
 - `aggregate_scan_metadata()` preserves legacy top-level metadata keys and adds nested `orchestrator` and `specialists` metadata.
 - `ExplorationResult` wraps the raw investigation transcript and metadata.

@@ -84,15 +84,15 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 7. A deterministic inventory phase summarizes file/language counts, top-level structure, entrypoint candidates, and sink candidates.
 8. An `OrchestratorAgent` explores the repository through bounded tool calls and returns potential vulnerability surfaces only.
 9. Deduplicated surfaces are dispatched sequentially to specialist agents for deeper investigation, fix generation, and fix verification.
-10. Each specialist result is persisted as soon as its fix and verification are ready, so findings can appear before the whole scan completes.
-11. Provider conversations are rebased onto compact summaries and bounded recent evidence excerpts so old raw tool outputs are not repeatedly resent.
-12. Findings store file path, line number, severity, confidence, description, code snippet, AI explanation, and a proposed fix with verification status and reason.
+10. Confirmed findings are kept even if optional fix generation or verification fails, and successful fixes still carry verification status and reason.
+11. Provider conversations and structured parsing use compact summaries plus bounded recent evidence excerpts so old raw tool outputs are not repeatedly resent.
+12. Findings store file path, line number, severity, confidence, description, code snippet, AI explanation, and any proposed fix with verification status and reason.
 13. The project page shows scan status, live counters, scan history, safe live agent activity, and read-only workspace browsing endpoints.
 
 ## Live Progress
 The command center polls a live operations partial so active scans and ingestion jobs appear and disappear without a manual refresh. Project pages also poll focused SAST scan and ingestion activity panels, including the `CANCELLING` state until worker cleanup finishes.
 
-Progress events are intentionally safe activity summaries. They include lifecycle phases, tool names, searched/read paths, line ranges, counts, model names, reviewed/total surfaces, findings/fix milestones, and status changes. They do not expose raw private model reasoning, full prompts, full tool outputs, source file contents, or proposed code bodies in the progress stream. Detailed findings and fixes remain available in the normal result views.
+Progress events are intentionally safe activity summaries. They include lifecycle phases, tool names, searched/read paths, line ranges, counts, model names, reviewed/total surfaces, findings/fix milestones, optional fix or verification failures, and status changes. They do not expose raw private model reasoning, full prompts, full tool outputs, source file contents, or proposed code bodies in the progress stream. Detailed findings and fixes remain available in the normal result views.
 
 Progress history is bounded per scan or project so the database keeps recent operational context without unbounded growth.
 
@@ -116,7 +116,7 @@ Progress history is bounded per scan or project so the database keeps recent ope
 - `VulnAssesor/` - project settings, URLs, and Celery bootstrap.
 
 ## Testing
-Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, inventory summaries, bounded context rebasing, multi-agent orchestration, registry dispatch, specialist fix flow, cancellation handling, streaming fix persistence, and scan status UI states. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
+Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, inventory summaries, bounded context rebasing, structured parse evidence, multi-agent orchestration, registry dispatch, specialist fix flow, optional fix/verification failure handling, cancellation handling, streaming fix persistence, and scan status UI states. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
 
 ## Current Limits
 - The app is configured for development use by default.
