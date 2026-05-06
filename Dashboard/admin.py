@@ -93,7 +93,7 @@ class NucleiConfigAdmin(admin.ModelAdmin):
 
 @admin.register(AIConfig)
 class AIConfigAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'scan_model', 'fix_model', 'verify_model', 'updated_at')
+    list_display = ('__str__', 'scan_model', 'fix_model', 'updated_at')
     readonly_fields = ('updated_at',)
 
     fieldsets = (
@@ -101,13 +101,13 @@ class AIConfigAdmin(admin.ModelAdmin):
             'fields': ('provider',),
         }),
         ('OpenAI Models', {
-            'fields': ('openai_scan_model', 'openai_fix_model', 'openai_verify_model'),
+            'fields': ('openai_scan_model', 'openai_fix_model'),
         }),
         ('Claude Models', {
-            'fields': ('anthropic_scan_model', 'anthropic_fix_model', 'anthropic_verify_model'),
+            'fields': ('anthropic_scan_model', 'anthropic_fix_model'),
         }),
         ('DeepSeek Models', {
-            'fields': ('deepseek_scan_model', 'deepseek_fix_model', 'deepseek_verify_model'),
+            'fields': ('deepseek_scan_model', 'deepseek_fix_model'),
         }),
         ('Environment Variables', {
             'fields': ('openai_api_key_env_var', 'anthropic_api_key_env_var', 'deepseek_api_key_env_var'),

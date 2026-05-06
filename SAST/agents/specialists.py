@@ -5,7 +5,7 @@ from django.conf import settings
 
 from .base import BaseToolCallingAgent, ScanCancelledError
 from .memory import merge_memory_metadata
-from .schemas import FixResult, ScanResult, SpecialistFindingResult, VerificationResult
+from .schemas import FixResult, ScanResult, SpecialistFindingResult
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +38,7 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
         for vulnerability in vulnerabilities:
             self.ensure_scan_active()
             fix = None
-            verification = None
             fix_error = ''
-            verification_error = ''
 
             try:
                 fix = self.generate_fix(vulnerability)
@@ -49,23 +47,12 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
             except Exception as exc:
                 fix_error = self._record_optional_phase_failure('fix', exc)
 
-            if fix:
-                self.ensure_scan_active()
-                try:
-                    verification = self.verify_fix(vulnerability, fix)
-                except ScanCancelledError:
-                    raise
-                except Exception as exc:
-                    verification_error = self._record_optional_phase_failure('verify', exc)
-
             result = SpecialistFindingResult(
                 surface_id=surface.surface_id,
                 vulnerability_type=surface.vulnerability_type,
                 vulnerability=vulnerability,
                 fix=fix,
-                verification=verification,
                 fix_error=fix_error,
-                verification_error=verification_error,
             )
             results.append(result)
 
@@ -137,38 +124,6 @@ class BaseSpecialistAgent(BaseToolCallingAgent):
                 + '\n\nReturn a structured fix. `scope` must be SNIPPET or FILE. '
                 'Use precise start_line and end_line values for the replacement range.'
             ),
-            user_prompt=exploration.memory.build_investigation_summary(
-                exploration.final_response_text,
-                include_evidence_excerpts=True,
-            ),
-        )
-
-    def verify_fix(self, vulnerability, fix):
-        finding = vulnerability.model_dump() if hasattr(vulnerability, 'model_dump') else vulnerability
-        fix_data = fix.model_dump() if hasattr(fix, 'model_dump') else fix
-        line_end = finding.get('end_line') or finding['line_number']
-        exploration = self._run_tool_loop(
-            task_prompt=(
-                f"Verify whether the proposed fix for '{finding['title']}' in {finding['file_path']} "
-                f"at lines {finding['line_number']}-{line_end} resolves the issue without introducing "
-                'new security bugs or obvious syntax problems. Use repository tools to inspect only the '
-                'necessary context.\n\n'
-                f'Finding details:\n{json.dumps(finding, ensure_ascii=True)}\n\n'
-                f'Proposed fix:\n{json.dumps(fix_data, ensure_ascii=True)}'
-            ),
-            model=self.verify_model,
-            max_tool_calls=settings.SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS,
-            progress_phase=f'specialist:{self.vulnerability_type.lower()}:verify',
-            progress_title=f'{self.specialist_title} fix verification',
-        )
-        self.phase_metadata.append({
-            'phase': 'verify',
-            **exploration.memory.build_metadata(exploration.stop_reason, exploration.final_response_text),
-        })
-        return self._parse_structured_output(
-            model=self.verify_model,
-            schema=VerificationResult,
-            system_prompt='You are a QA engineer verifying AI-generated security fixes. Return structured verification only.',
             user_prompt=exploration.memory.build_investigation_summary(
                 exploration.final_response_text,
                 include_evidence_excerpts=True,

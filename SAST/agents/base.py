@@ -31,7 +31,6 @@ class BaseToolCallingAgent:
         )
         self.scan_model = self.provider_settings.get('scan_model')
         self.fix_model = self.provider_settings.get('fix_model')
-        self.verify_model = self.provider_settings.get('verify_model')
         self.system_context = system_context or self._load_project_context()
         if system_context_extra:
             self.system_context += '\n\n' + system_context_extra

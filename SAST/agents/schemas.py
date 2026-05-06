@@ -43,11 +43,6 @@ class FixResult(BaseModel):
     explanation: str
 
 
-class VerificationResult(BaseModel):
-    is_true_positive: bool
-    reasoning: str
-
-
 class VulnerabilitySurface(BaseModel):
     surface_id: str
     vulnerability_type: str
@@ -69,9 +64,7 @@ class SpecialistFindingResult(BaseModel):
     vulnerability_type: str
     vulnerability: Vulnerability
     fix: FixResult | None = None
-    verification: VerificationResult | None = None
     fix_error: str = ''
-    verification_error: str = ''
     specialist_metadata: dict = Field(default_factory=dict)
 
 

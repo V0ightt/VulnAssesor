@@ -159,12 +159,11 @@ def run_sast_scan(self, scan_job_id):
                 phase='provider',
                 event_type='provider_ready',
                 title='AI provider ready',
-                detail=f"{provider_settings.get('provider_label', provider_settings.get('provider'))} configured for scan, fix, and verification phases.",
+                detail=f"{provider_settings.get('provider_label', provider_settings.get('provider'))} configured for scan and fix phases.",
                 payload={
                     'provider': provider_settings.get('provider'),
                     'scan_model': provider_settings.get('scan_model'),
                     'fix_model': provider_settings.get('fix_model'),
-                    'verify_model': provider_settings.get('verify_model'),
                 },
             )
         except ValueError as e:
@@ -324,29 +323,6 @@ def _persist_specialist_result(scan_job, specialist_result):
     if not fix_data:
         return finding
 
-    verification = specialist_result.verification
-    verification_error = getattr(specialist_result, 'verification_error', '') or ''
-    verification_status = 'NOT_VERIFIED'
-    verification_reason = ''
-    if verification_error:
-        verification_reason = _bounded_optional_error(verification_error)
-        record_scan_event(
-            scan_job,
-            phase='persist',
-            event_type='verification_failed',
-            title='Fix verification failed',
-            detail=finding.title,
-            payload={
-                'finding_id': finding.id,
-                'error': verification_reason,
-            },
-        )
-    elif verification:
-        verification_status = 'PASSED' if verification.is_true_positive else 'FAILED'
-        verification_reason = verification.reasoning
-        if not verification.is_true_positive:
-            logger.warning(f"Fix verification failed for {finding.title}: {verification.reasoning}")
-
     apply_fix(
         finding_id=finding.id,
         proposed_code=fix_data.fixed_code,
@@ -354,8 +330,6 @@ def _persist_specialist_result(scan_job, specialist_result):
         scope=fix_data.scope,
         start_line=fix_data.start_line,
         end_line=fix_data.end_line,
-        verification_status=verification_status,
-        verification_reason=verification_reason,
     )
     record_scan_event(
         scan_job,
@@ -368,7 +342,6 @@ def _persist_specialist_result(scan_job, specialist_result):
             'scope': fix_data.scope,
             'start_line': fix_data.start_line,
             'end_line': fix_data.end_line,
-            'verification_status': verification_status,
         },
     )
     return finding

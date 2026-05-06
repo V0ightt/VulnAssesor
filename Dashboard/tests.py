@@ -30,13 +30,10 @@ class AIConfigTests(TestCase):
                 'provider': 'deepseek',
                 'openai_scan_model': 'gpt-5-nano',
                 'openai_fix_model': 'gpt-5-nano',
-                'openai_verify_model': 'gpt-5-nano',
                 'anthropic_scan_model': 'claude-sonnet-4-5',
                 'anthropic_fix_model': 'claude-sonnet-4-5',
-                'anthropic_verify_model': 'claude-sonnet-4-5',
                 'deepseek_scan_model': 'deepseek-custom-scan',
                 'deepseek_fix_model': 'deepseek-custom-fix',
-                'deepseek_verify_model': 'deepseek-custom-verify',
                 'openai_api_key_env_var': 'OPENAI_API_KEY',
                 'anthropic_api_key_env_var': 'ANTHROPIC_API_KEY',
                 'deepseek_api_key_env_var': 'DEEPSEEK_API_KEY',
@@ -52,7 +49,6 @@ class AIConfigTests(TestCase):
         self.assertEqual(config.provider, 'deepseek')
         self.assertEqual(config.scan_model, 'deepseek-custom-scan')
         self.assertEqual(config.fix_model, 'deepseek-custom-fix')
-        self.assertEqual(config.verify_model, 'deepseek-custom-verify')
         self.assertEqual(config.openai_scan_model, 'gpt-5-nano')
         self.assertEqual(config.anthropic_scan_model, 'claude-sonnet-4-5')
         self.assertEqual(config.max_output_tokens, 8192)
@@ -68,21 +64,19 @@ class AIConfigTests(TestCase):
         config = AIConfig.get_config()
         config.openai_scan_model = 'openai-scan'
         config.openai_fix_model = 'openai-fix'
-        config.openai_verify_model = 'openai-verify'
         config.anthropic_scan_model = 'claude-scan'
         config.anthropic_fix_model = 'claude-fix'
-        config.anthropic_verify_model = 'claude-verify'
         config.deepseek_scan_model = 'deepseek-scan'
         config.deepseek_fix_model = 'deepseek-fix'
-        config.deepseek_verify_model = 'deepseek-verify'
 
         config.provider = 'anthropic'
         self.assertEqual(config.selected_provider_settings()['scan_model'], 'claude-scan')
         self.assertEqual(config.fix_model, 'claude-fix')
+        self.assertNotIn('verify_model', config.selected_provider_settings())
 
         config.provider = 'openai'
         self.assertEqual(config.selected_provider_settings()['scan_model'], 'openai-scan')
-        self.assertEqual(config.verify_model, 'openai-verify')
+        self.assertEqual(config.fix_model, 'openai-fix')
 
 
 class DashboardProgressTests(TestCase):

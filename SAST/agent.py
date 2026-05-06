@@ -12,7 +12,6 @@ from .agents.schemas import (
     ScanExecutionResult,
     ScanResult,
     SpecialistFindingResult,
-    VerificationResult,
     Vulnerability,
     VulnerabilitySurface,
 )
@@ -100,34 +99,6 @@ class SASTAgent(BaseToolCallingAgent):
         )
         return result.model_dump()
 
-    def verify_fix(self, finding, fix_data):
-        line_end = finding.get('end_line') or finding['line_number']
-        exploration = self._run_tool_loop(
-            task_prompt=(
-                f"Verify whether the proposed fix for '{finding['title']}' in {finding['file_path']} "
-                f"at lines {finding['line_number']}-{line_end} resolves the issue without introducing "
-                'new security bugs or obvious syntax problems. Use repository tools to inspect only the '
-                'necessary context.\n\n'
-                f'Finding details:\n{json.dumps(finding, ensure_ascii=True)}\n\n'
-                f'Proposed fix:\n{json.dumps(fix_data, ensure_ascii=True)}'
-            ),
-            model=self.verify_model,
-            max_tool_calls=settings.SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS,
-        )
-        result = self._parse_structured_output(
-            model=self.verify_model,
-            schema=VerificationResult,
-            system_prompt='You are a QA engineer verifying AI-generated security fixes. Return structured verification only.',
-            user_prompt=exploration.memory.build_investigation_summary(
-                exploration.final_response_text,
-                include_evidence_excerpts=True,
-            ),
-        )
-        return {
-            'verified': result.is_true_positive,
-            'reason': result.reasoning,
-        }
-
 
 __all__ = [
     'ExplorationResult',
@@ -140,7 +111,6 @@ __all__ = [
     'ScanMemoryManager',
     'ScanResult',
     'SpecialistFindingResult',
-    'VerificationResult',
     'Vulnerability',
     'VulnerabilitySurface',
     'build_provider',

@@ -15,7 +15,6 @@ from .agent import (
     ScanCancelledError,
     ScanMemoryManager,
     ScanResult,
-    VerificationResult,
     Vulnerability,
 )
 from .agents.memory import aggregate_scan_metadata
@@ -540,7 +539,6 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
         return {
             'scan_model': 'scan-model',
             'fix_model': 'fix-model',
-            'verify_model': 'verify-model',
         }
 
     def surface(self, vulnerability_type='COMMAND_INJECTION'):
@@ -573,12 +571,6 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
             end_line=9,
             fixed_code='safe_cmd = [user_cmd]\nreturn subprocess.run(safe_cmd, shell=False, capture_output=True, text=True)',
             explanation='Execute the command without invoking a shell.',
-        )
-
-    def verification(self):
-        return VerificationResult(
-            is_true_positive=True,
-            reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
         )
 
     def test_registry_dispatches_known_types_and_unknown_falls_back(self):
@@ -650,7 +642,7 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
             )
         self.assertLessEqual(scan_job.progress_events.count(), ProjectProgressEvent.MAX_EVENTS_PER_SCAN)
 
-    def test_specialist_investigates_generates_fix_and_verifies(self):
+    def test_specialist_investigates_and_generates_fix_without_verification(self):
         self.load_fixture_repo()
         fake_provider = FakeProvider(
             tool_responses=[
@@ -658,13 +650,10 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
                 fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
-                fake_tool_response(output_text='The fix removes shell execution.'),
             ],
             parse_responses=[
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                self.verification(),
             ],
         )
         specialist = CommandInjectionSpecialistAgent(
@@ -678,9 +667,10 @@ class MultiAgentPipelineTests(WorkspaceTestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].surface_id, 'surface-1')
         self.assertEqual(results[0].fix.scope, 'SNIPPET')
-        self.assertTrue(results[0].verification.is_true_positive)
-        self.assertEqual(results[0].specialist_metadata['tool_call_count'], 3)
-        self.assertEqual(len(results[0].specialist_metadata['phases']), 3)
+        self.assertEqual(results[0].specialist_metadata['tool_call_count'], 2)
+        self.assertEqual(len(results[0].specialist_metadata['phases']), 2)
+        self.assertEqual(fake_provider._tool_responses, [])
+        self.assertEqual(fake_provider._parse_responses, [])
 
 
 class RunSastScanTaskTests(WorkspaceTestCase):
@@ -716,12 +706,6 @@ class RunSastScanTaskTests(WorkspaceTestCase):
             explanation='Execute the command without invoking a shell.',
         )
 
-    def verification(self):
-        return VerificationResult(
-            is_true_positive=True,
-            reasoning='The proposed fix removes shell interpretation and preserves the handler flow.',
-        )
-
     def test_run_sast_scan_routes_all_ai_calls_through_provider(self):
         self.load_fixture_repo()
         scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
@@ -734,14 +718,11 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
                 fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
-                fake_tool_response(output_text='The fix removes shell execution and remains syntactically safe.'),
             ],
             parse_responses=[
                 OrchestratorSurfaceResult(surfaces=[self.surface()]),
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                self.verification(),
             ],
         )
 
@@ -751,9 +732,11 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         scan_job.refresh_from_db()
         self.assertEqual(scan_job.status, 'COMPLETED')
         self.assertIn('completed', result.lower())
-        self.assertEqual(len(fake_provider.parse_calls), 4)
-        self.assertEqual(len(fake_provider.appended_tool_results), 5)
+        self.assertEqual(len(fake_provider.parse_calls), 3)
+        self.assertEqual(len(fake_provider.appended_tool_results), 4)
         self.assertEqual(fake_provider.create_calls[0]['model'], 'gpt-5-nano')
+        self.assertEqual(fake_provider._tool_responses, [])
+        self.assertEqual(fake_provider._parse_responses, [])
 
     def test_run_sast_scan_persists_snippet_fix_fields_and_metadata(self):
         self.load_fixture_repo()
@@ -767,14 +750,11 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Confirmed user input reaches shell=True subprocess.'),
                 fake_tool_response(fake_tool_call('fix-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(fake_tool_call('verify-1', 'read_file', '{"filepath":"app/views.py","start_line":6,"end_line":12}')),
-                fake_tool_response(output_text='The fix removes shell execution and remains syntactically safe.'),
             ],
             parse_responses=[
                 OrchestratorSurfaceResult(surfaces=[self.surface()]),
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                self.verification(),
             ],
         )
 
@@ -784,7 +764,7 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         scan_job.refresh_from_db()
         self.assertEqual(scan_job.status, 'COMPLETED')
         self.assertIn('completed', result.lower())
-        self.assertEqual(scan_job.agent_run_metadata['tool_call_count'], 5)
+        self.assertEqual(scan_job.agent_run_metadata['tool_call_count'], 4)
         self.assertIn('orchestrator', scan_job.agent_run_metadata)
         self.assertEqual(scan_job.agent_run_metadata['specialists'][0]['surface_id'], 'surface-1')
         self.assertEqual(scan_job.findings.count(), 1)
@@ -793,7 +773,8 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertEqual(fix.scope, 'SNIPPET')
         self.assertEqual(fix.start_line, 8)
         self.assertEqual(fix.end_line, 9)
-        self.assertEqual(fix.verification_status, 'PASSED')
+        self.assertEqual(fix.verification_status, 'NOT_VERIFIED')
+        self.assertEqual(fix.verification_reason, '')
         self.assertEqual(scan_job.findings.first().confidence_score, 0.97)
 
     def test_run_sast_scan_keeps_finding_when_fix_generation_fails(self):
@@ -824,7 +805,7 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         phases = scan_job.agent_run_metadata['specialists'][0]['metadata']['phases']
         self.assertTrue(any(phase.get('phase') == 'fix' and phase.get('error') for phase in phases))
 
-    def test_run_sast_scan_keeps_fix_when_verification_fails(self):
+    def test_run_sast_scan_does_not_run_fix_verification(self):
         self.load_fixture_repo()
         scan_job = SASTScanJob.objects.create(project=self.project, status='PENDING')
         fake_provider = FakeProvider(
@@ -832,13 +813,11 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Potential subprocess surface in app/views.py.'),
                 fake_tool_response(output_text='Confirmed command injection.'),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(output_text='Verification produced malformed structured output.'),
             ],
             parse_responses=[
                 OrchestratorSurfaceResult(surfaces=[self.surface()]),
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                RuntimeError('verify parse failed'),
             ],
         )
 
@@ -851,8 +830,10 @@ class RunSastScanTaskTests(WorkspaceTestCase):
         self.assertEqual(scan_job.findings.count(), 1)
         fix = SASTFix.objects.get()
         self.assertEqual(fix.verification_status, 'NOT_VERIFIED')
-        self.assertIn('verify parse failed', fix.verification_reason)
-        self.assertTrue(ProjectProgressEvent.objects.filter(scan_job=scan_job, event_type='verification_failed').exists())
+        self.assertEqual(fix.verification_reason, '')
+        self.assertFalse(ProjectProgressEvent.objects.filter(scan_job=scan_job, event_type='verification_failed').exists())
+        self.assertEqual(fake_provider._tool_responses, [])
+        self.assertEqual(fake_provider._parse_responses, [])
 
     def test_run_sast_scan_persists_each_specialist_before_scan_completion(self):
         self.load_fixture_repo()
@@ -863,7 +844,6 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Potential surfaces found.'),
                 fake_tool_response(output_text='Confirmed first finding.'),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(output_text='The fix removes shell execution.'),
                 fake_tool_response(fake_tool_call('spec-2', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
                 fake_tool_response(output_text='No finding on second surface.'),
             ],
@@ -871,7 +851,6 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 OrchestratorSurfaceResult(surfaces=[self.surface(), second_surface]),
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                self.verification(),
                 ScanResult(findings=[]),
             ],
         )
@@ -980,14 +959,12 @@ class RunSastScanTaskTests(WorkspaceTestCase):
                 fake_tool_response(output_text='Potential surfaces found.'),
                 fake_tool_response(output_text='Confirmed first finding.'),
                 fake_tool_response(output_text='A snippet-scoped fix is sufficient.'),
-                fake_tool_response(output_text='The fix removes shell execution.'),
                 fake_tool_response(fake_tool_call('spec-2', 'read_file', '{"filepath":"app/views.py","start_line":1,"end_line":20}')),
             ],
             parse_responses=[
                 OrchestratorSurfaceResult(surfaces=[self.surface(), second_surface]),
                 ScanResult(findings=[self.vulnerability()]),
                 self.fix(),
-                self.verification(),
             ],
         )
 
@@ -1062,7 +1039,9 @@ class SASTScanStatusViewTests(WorkspaceTestCase):
         response = self.render_status('CANCELLED', with_finding=True)
 
         self.assertContains(response, 'Vulnerabilities Found (1)')
-        self.assertContains(response, 'Passed')
+        self.assertContains(response, 'Suggested Fix')
+        self.assertNotContains(response, 'Passed')
+        self.assertNotContains(response, 'The shell is no longer used.')
 
     def test_scan_status_view_renders_completed_empty_state(self):
         response = self.render_status('COMPLETED')

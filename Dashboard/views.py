@@ -752,16 +752,15 @@ def nuclei_config_view(request):
 
                 ai_config.provider = provider
                 provider_fields = {
-                    'openai': ('openai_scan_model', 'openai_fix_model', 'openai_verify_model'),
-                    'anthropic': ('anthropic_scan_model', 'anthropic_fix_model', 'anthropic_verify_model'),
-                    'deepseek': ('deepseek_scan_model', 'deepseek_fix_model', 'deepseek_verify_model'),
+                    'openai': ('openai_scan_model', 'openai_fix_model'),
+                    'anthropic': ('anthropic_scan_model', 'anthropic_fix_model'),
+                    'deepseek': ('deepseek_scan_model', 'deepseek_fix_model'),
                 }
                 for provider_name, fields in provider_fields.items():
                     defaults = AIConfig.provider_defaults()[provider_name]
                     default_values = (
                         defaults['scan_model'],
                         defaults['fix_model'],
-                        defaults['verify_model'],
                     )
                     for field, default_value in zip(fields, default_values):
                         setattr(ai_config, field, request.POST.get(field, '').strip() or default_value)

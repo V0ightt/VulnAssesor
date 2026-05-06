@@ -11,7 +11,7 @@ VulnAssesor is a Django 5.2 security assessment workspace for websites and sourc
 - Create SAST projects from Git URLs or ZIP uploads.
 - Watch real-time scan progress and review findings.
 - Watch safe live activity for DAST scans, SAST scans, and project ingestion.
-- Read SAST findings as they are saved, with AI explanations, collapsed proposed fixes, and verification status.
+- Read SAST findings as they are saved, with AI explanations and collapsed proposed fixes.
 - Browse imported repositories with a read-only file explorer and code viewer.
 
 ## Stack
@@ -60,7 +60,7 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 - `POSTGRES_NAME`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` - PostgreSQL settings.
 - `SAST_SCAN_MAX_TOOL_CALLS`, `SAST_SCAN_MAX_SEARCH_RESULTS`, `SAST_SCAN_MAX_READ_LINES`, `SAST_SCAN_MAX_DIRECTORY_ENTRIES`, `SAST_SCAN_MAX_TOOL_RESULT_BYTES`, `SAST_SCAN_MAX_FILE_BYTES`, `SAST_SCAN_RIPGREP_TIMEOUT`, `SAST_SCAN_SOFT_CONTEXT_TOKENS`, `SAST_SCAN_HARD_CONTEXT_TOKENS` - shared SAST tool and context limits.
 - `SAST_SCAN_ORCHESTRATOR_MAX_TOOL_CALLS` - tool-call budget for broad SAST surface discovery. Defaults to `SAST_SCAN_MAX_TOOL_CALLS`.
-- `SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS` - per-specialist tool-call budget for investigation, fix generation, and verification. Defaults to half of `SAST_SCAN_MAX_TOOL_CALLS`, with a minimum of 6.
+- `SAST_SCAN_SPECIALIST_MAX_TOOL_CALLS` - per-specialist tool-call budget for investigation and fix generation. Defaults to half of `SAST_SCAN_MAX_TOOL_CALLS`, with a minimum of 6.
 - `SAST_SCAN_MAX_SPECIALISTS` - maximum deduplicated vulnerability surfaces dispatched to specialists in one scan. Defaults to 6.
 - `SAST_SCAN_INVENTORY_MAX_FILES` and `SAST_SCAN_MAX_SINK_CANDIDATES` - deterministic repository inventory limits used before AI exploration.
 
@@ -83,16 +83,16 @@ Static assets are served from `/static/` and collected into `staticfiles/` durin
 6. `SASTScanOrchestrator` runs inside the existing `run_sast_scan` Celery task.
 7. A deterministic inventory phase summarizes file/language counts, top-level structure, entrypoint candidates, and sink candidates.
 8. An `OrchestratorAgent` explores the repository through bounded tool calls and returns potential vulnerability surfaces only.
-9. Deduplicated surfaces are dispatched sequentially to specialist agents for deeper investigation, fix generation, and fix verification.
-10. Confirmed findings are kept even if optional fix generation or verification fails, and successful fixes still carry verification status and reason.
+9. Deduplicated surfaces are dispatched sequentially to specialist agents for deeper investigation and fix generation.
+10. Confirmed findings are kept even if optional fix generation fails, and successful fixes are saved without automatic verification.
 11. Provider conversations and structured parsing use compact summaries plus bounded recent evidence excerpts so old raw tool outputs are not repeatedly resent.
-12. Findings store file path, line number, severity, confidence, description, code snippet, AI explanation, and any proposed fix with verification status and reason.
+12. Findings store file path, line number, severity, confidence, description, code snippet, AI explanation, and any proposed fix.
 13. The project page shows scan status, live counters, scan history, safe live agent activity, and read-only workspace browsing endpoints.
 
 ## Live Progress
 The command center polls a live operations partial so active scans and ingestion jobs appear and disappear without a manual refresh. Project pages also poll focused SAST scan and ingestion activity panels, including the `CANCELLING` state until worker cleanup finishes.
 
-Progress events are intentionally safe activity summaries. They include lifecycle phases, tool names, searched/read paths, line ranges, counts, model names, reviewed/total surfaces, findings/fix milestones, optional fix or verification failures, and status changes. They do not expose raw private model reasoning, full prompts, full tool outputs, source file contents, or proposed code bodies in the progress stream. Detailed findings and fixes remain available in the normal result views.
+Progress events are intentionally safe activity summaries. They include lifecycle phases, tool names, searched/read paths, line ranges, counts, model names, reviewed/total surfaces, findings/fix milestones, optional fix failures, and status changes. They do not expose raw private model reasoning, full prompts, full tool outputs, source file contents, or proposed code bodies in the progress stream. Detailed findings and fixes remain available in the normal result views.
 
 Progress history is bounded per scan or project so the database keeps recent operational context without unbounded growth.
 
@@ -116,7 +116,7 @@ Progress history is bounded per scan or project so the database keeps recent ope
 - `VulnAssesor/` - project settings, URLs, and Celery bootstrap.
 
 ## Testing
-Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, inventory summaries, bounded context rebasing, structured parse evidence, multi-agent orchestration, registry dispatch, specialist fix flow, optional fix/verification failure handling, cancellation handling, streaming fix persistence, and scan status UI states. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
+Most of the automated behavior coverage lives in `SAST/tests.py`, which exercises the repository tooling, memory manager, inventory summaries, bounded context rebasing, structured parse evidence, multi-agent orchestration, registry dispatch, specialist fix flow, optional fix failure handling, cancellation handling, streaming fix persistence, and scan status UI states. `Dashboard/tests.py` is still a placeholder, so changes to the dashboard should be checked carefully.
 
 ## Current Limits
 - The app is configured for development use by default.

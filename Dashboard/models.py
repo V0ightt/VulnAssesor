@@ -379,7 +379,6 @@ class AIConfig(models.Model):
             'base_url': self.selected_base_url(),
             'scan_model': selected_models['scan_model'],
             'fix_model': selected_models['fix_model'],
-            'verify_model': selected_models['verify_model'],
             'max_output_tokens': self.max_output_tokens,
             'request_timeout': self.request_timeout,
         }

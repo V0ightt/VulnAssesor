@@ -8,7 +8,6 @@ from .schemas import (
     ScanExecutionResult,
     ScanResult,
     SpecialistFindingResult,
-    VerificationResult,
     Vulnerability,
     VulnerabilitySurface,
 )
@@ -42,7 +41,6 @@ __all__ = [
     'ScanResult',
     'SpecialistFindingResult',
     'SpecialistRegistry',
-    'VerificationResult',
     'Vulnerability',
     'VulnerabilitySurface',
     'XSSSpecialistAgent',

@@ -222,7 +222,7 @@
                 </svg>
                 Provider
             </h3>
-            <p class="section-description">Choose the backend used for SAST scan, fix generation, and verification.</p>
+            <p class="section-description">Choose the backend used for SAST scan and fix generation.</p>
 
             <div class="provider-grid">
                 <label class="provider-card {% if ai_config.provider == 'openai' %}selected{% endif %}">
@@ -264,7 +264,7 @@
                 </svg>
                 Provider Models
             </h3>
-            <p class="section-description">Configure scan exploration, fix generation, and fix verification models independently for each provider.</p>
+            <p class="section-description">Configure scan exploration and fix generation models independently for each provider.</p>
 
             <div class="provider-model-settings">
                 <div class="provider-model-panel {% if ai_config.provider == 'openai' %}active-provider{% endif %}">
@@ -280,10 +280,6 @@
                         <div class="form-group">
                             <label for="openai_fix_model">Fix Model</label>
                             <input type="text" id="openai_fix_model" name="openai_fix_model" value="{{ ai_config.openai_fix_model }}" class="form-input">
-                        </div>
-                        <div class="form-group">
-                            <label for="openai_verify_model">Verification Model</label>
-                            <input type="text" id="openai_verify_model" name="openai_verify_model" value="{{ ai_config.openai_verify_model }}" class="form-input">
                         </div>
                     </div>
                 </div>
@@ -302,10 +298,6 @@
                             <label for="anthropic_fix_model">Fix Model</label>
                             <input type="text" id="anthropic_fix_model" name="anthropic_fix_model" value="{{ ai_config.anthropic_fix_model }}" class="form-input">
                         </div>
-                        <div class="form-group">
-                            <label for="anthropic_verify_model">Verification Model</label>
-                            <input type="text" id="anthropic_verify_model" name="anthropic_verify_model" value="{{ ai_config.anthropic_verify_model }}" class="form-input">
-                        </div>
                     </div>
                 </div>
 
@@ -322,10 +314,6 @@
                         <div class="form-group">
                             <label for="deepseek_fix_model">Fix Model</label>
                             <input type="text" id="deepseek_fix_model" name="deepseek_fix_model" value="{{ ai_config.deepseek_fix_model }}" class="form-input">
-                        </div>
-                        <div class="form-group">
-                            <label for="deepseek_verify_model">Verification Model</label>
-                            <input type="text" id="deepseek_verify_model" name="deepseek_verify_model" value="{{ ai_config.deepseek_verify_model }}" class="form-input">
                         </div>
                     </div>
                 </div>
@@ -392,9 +380,8 @@
         <div class="ai-summary">
             <strong>Active workflow:</strong>
             Future SAST scans will use {{ ai_config.get_provider_display }} with
-            scan model <code>{{ ai_config.scan_model }}</code>,
-            fix model <code>{{ ai_config.fix_model }}</code>, and
-            verification model <code>{{ ai_config.verify_model }}</code>.
+            scan model <code>{{ ai_config.scan_model }}</code>
+            and fix model <code>{{ ai_config.fix_model }}</code>.
         </div>
 
         <div class="form-actions">

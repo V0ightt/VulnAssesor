@@ -85,14 +85,8 @@
                 <details class="sast-fix-panel">
                     <summary>
                         <span>Suggested Fix</span>
-                        <span class="verification verification-{{ finding.fix.verification_status|lower }}">
-                            {{ finding.fix.get_verification_status_display }}
-                        </span>
                     </summary>
                     <p>{{ finding.fix.explanation }}</p>
-                    {% if finding.fix.verification_reason %}
-                    <div class="sast-verification-reason">{{ finding.fix.verification_reason }}</div>
-                    {% endif %}
                     <div class="sast-code-block fix">
                         <div>
                             Proposed Change

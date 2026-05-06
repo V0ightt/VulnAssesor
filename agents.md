@@ -159,13 +159,13 @@ Fields:
 - `provider` - `openai`, `anthropic`, or `deepseek`
 - `openai_scan_model`
 - `openai_fix_model`
-- `openai_verify_model`
 - `anthropic_scan_model`
 - `anthropic_fix_model`
-- `anthropic_verify_model`
 - `deepseek_scan_model`
 - `deepseek_fix_model`
-- `deepseek_verify_model`
+- `openai_verify_model` - legacy compatibility field, not exposed in the current configuration UI
+- `anthropic_verify_model` - legacy compatibility field, not exposed in the current configuration UI
+- `deepseek_verify_model` - legacy compatibility field, not exposed in the current configuration UI
 - `openai_api_key_env_var`
 - `anthropic_api_key_env_var`
 - `deepseek_api_key_env_var`
@@ -182,7 +182,7 @@ Behavior:
 - API key values are never stored in the database; only environment variable names are stored.
 - `require_api_key()` fails fast with the missing environment variable name.
 - `key_statuses()` exposes configured/missing state for the configuration UI without exposing secret values.
-- `selected_provider_settings()` returns the active provider's API settings and provider-specific scan, fix, and verification models.
+- `selected_provider_settings()` returns the active provider's API settings and provider-specific scan and fix models.
 
 #### `ScanJob`
 - `website`
@@ -410,6 +410,8 @@ Indexes:
 - `verification_reason`
 - `created_at`
 
+Verification fields are retained for historical scan compatibility. The current SAST workflow does not run automatic fix verification, so new fixes use the default `NOT_VERIFIED` status with a blank reason.
+
 Status values:
 - `PENDING`
 - `ACCEPTED`
@@ -484,9 +486,9 @@ When a scan starts, `run_sast_scan`:
 6. Builds a deterministic repository inventory with file/language counts, top-level structure, entrypoint candidates, and vulnerability sink candidates from bounded searches.
 7. Runs `OrchestratorAgent.discover_surfaces()` to gather potential vulnerability surfaces, using the inventory only as routing context.
 8. Deduplicates surfaces and dispatches them sequentially through `SpecialistRegistry`.
-9. Runs each specialist's investigation, fix generation, and fix verification in its own conversation and memory scope.
-10. Preserves confirmed findings even if optional fix generation or verification fails, while still saving successful fixes and verification outcomes.
-11. Emits safe progress events for provider setup, inventory, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, optional fix or verification failures, completion, failure, and cancellation.
+9. Runs each specialist's investigation and fix generation in separate conversations and memory scopes.
+10. Preserves confirmed findings even if optional fix generation fails, while still saving successful fixes.
+11. Emits safe progress events for provider setup, inventory, orchestrator exploration, tool calls, surface dispatch, specialist phases, finding persistence, fix persistence, optional fix failures, completion, failure, and cancellation.
 12. Stores running and final aggregate orchestrator, specialist, inventory, surface, and tool metadata in `agent_run_metadata`.
 13. Marks the scan `COMPLETED`, stores `completed_at`, and updates `project.last_scan`.
 
@@ -552,7 +554,7 @@ Core characteristics:
 - `OrchestratorAgent` performs broad repository exploration and returns potential `VulnerabilitySurface` objects only.
 - `SpecialistRegistry` maps vulnerability types to specialist classes and falls back to `GenericSecuritySpecialistAgent`.
 - Specialists run sequentially for v1; Celery fan-out is intentionally deferred.
-- Agents return structured data only. `run_sast_scan` remains the persistence boundary, and confirmed findings are kept even when optional fix generation or verification fails.
+- Agents return structured data only. `run_sast_scan` remains the persistence boundary, and confirmed findings are kept even when optional fix generation fails.
 - One provider is built from `AIConfig` per scan and passed to each agent; each agent starts its own conversation.
 - Provider conversations and structured parse prompts use compact summaries and bounded recent evidence excerpts so older raw tool outputs are not repeatedly resent.
 - It loads the target project's `agents.md`, `AGENTS.md`, and `README.md` into the system context when available.
@@ -587,16 +589,15 @@ Supported vulnerability surface types:
 - `OTHER`
 
 Current default model names:
-- OpenAI: `gpt-5-nano` for scanning, fix generation, and verification
-- Claude: `claude-sonnet-4-5` for scanning, fix generation, and verification
-- DeepSeek: `deepseek-v4-flash` for scanning, fix generation, and verification
-- Each provider has independent scan, fix, and verification model fields in Configuration > AI Providers.
+- OpenAI: `gpt-5-nano` for scanning and fix generation
+- Claude: `claude-sonnet-4-5` for scanning and fix generation
+- DeepSeek: `deepseek-v4-flash` for scanning and fix generation
+- Each provider has independent scan and fix model fields in Configuration > AI Providers.
 
 Structured output models:
 - `Vulnerability`
 - `ScanResult`
 - `FixResult`
-- `VerificationResult`
 - `VulnerabilitySurface`
 - `OrchestratorSurfaceResult`
 - `SpecialistFindingResult`
@@ -612,7 +613,7 @@ Supporting components:
 - `SAST/llm/` contains provider adapters, provider conversation rebasing hooks, and the provider registry.
 
 Implementation note:
-- This is a repository-exploration pipeline, not a simple per-file loop. The orchestrator decides which surfaces merit deeper review, and specialists convert gathered evidence into confirmed findings, proposed fixes, and verification results.
+- This is a repository-exploration pipeline, not a simple per-file loop. The orchestrator decides which surfaces merit deeper review, and specialists convert gathered evidence into confirmed findings and proposed fixes.
 
 ### 6.7 SAST templates and UI
 
@@ -631,7 +632,7 @@ Important UI behavior:
 - `project_detail` auto-refreshes the outer content while ingestion is in progress.
 - `scan_status` polls every 2 seconds for active and cancelling scans.
 - The project detail view shows scan controls, current scan status, elapsed time, current phase, reviewed/total surfaces, tool calls, findings saved, last activity, cancellation state, safe live scan activity, ingestion activity, findings, fixes, and read-only project context.
-- Findings render as soon as they are persisted; proposed fixes are collapsed by default and show explicit verification status and reason.
+- Findings render as soon as they are persisted; proposed fixes are collapsed by default and show the fix explanation and proposed code without automatic verification badges.
 - The file explorer and viewer are implemented as read-only partial endpoints for repository navigation and syntax-highlighted code viewing.
 - Pygments uses the Monokai theme for code highlighting.
 
@@ -721,7 +722,7 @@ If you change SAST internals, the existing tests are the best safety net. Dashbo
 - Deterministic SAST pre-scan repository inventory
 - Streaming SAST finding/fix persistence during sequential specialist execution
 - Safe live SAST agent activity, tool-call, and phase progress events
-- Fix generation and verification
+- Fix generation
 - Workspace deletion and cancellation flows
 - Docker-based local environment
 
